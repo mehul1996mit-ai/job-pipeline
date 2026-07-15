@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 
 import requests
 
@@ -78,8 +79,12 @@ def _call_gemini(prompt: str, model: str) -> str:
         f"{model}:generateContent",
         headers={"x-goog-api-key": key},  # header, not URL: keeps the key out of error messages/CI logs
         json={"contents": [{"parts": [{"text": prompt}]}],
+              # thinkingBudget: 0 stops "thinking" models from spending the
+              # whole output-token budget on hidden reasoning and returning
+              # no visible text (observed on gemini-flash-latest).
               "generationConfig": {"temperature": 0.3,
-                                   "maxOutputTokens": 1024}},
+                                   "maxOutputTokens": 1536,
+                                   "thinkingConfig": {"thinkingBudget": 0}}},
         timeout=60)
     r.raise_for_status()
     candidates = r.json().get("candidates", [])
@@ -145,6 +150,28 @@ def tailor_job(cv_text: str, job: dict, missing_keywords: list[str],
     )
     try:
         raw = call(prompt, model)
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        if status in (429, 503):
+            # One polite retry after a short pause -- not a retry-hammer,
+            # just enough to ride out a transient free-tier throttle.
+            log(f"tailor: {provider} {status} for '{job.get('title')}' — "
+                "retrying once after 20s")
+            time.sleep(20)
+            try:
+                raw = call(prompt, model)
+            except Exception as e2:
+                log(f"tailor: {provider} retry failed for "
+                    f"'{job.get('title')}' ({e2})")
+                out = dict(EMPTY)
+                out["honest_gap_note"] = f"tailoring skipped ({e2})"
+                return out
+        else:
+            log(f"tailor: {provider} call failed for '{job.get('title')}' "
+                f"({e})")
+            out = dict(EMPTY)
+            out["honest_gap_note"] = f"tailoring skipped ({e})"
+            return out
     except Exception as e:
         log(f"tailor: {provider} call failed for '{job.get('title')}' ({e})")
         out = dict(EMPTY)

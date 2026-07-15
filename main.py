@@ -97,7 +97,7 @@ def main():
         j["tailored"] = tailor_mod.tailor_job(
             cv.raw_text, j, j["missing_keywords"], config, log=log)
         log(f"   tailored {i}/{len(to_tailor)}: {j['title']} @ {j['company']}")
-        time.sleep(1.0)  # gentle on free-tier rate limits
+        time.sleep(3.0)  # gentle on free-tier rate limits
 
     csv_path = report.write_queue(new_jobs)
     log(f"   wrote {csv_path}")
