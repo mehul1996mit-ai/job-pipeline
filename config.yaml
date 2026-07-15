@@ -87,7 +87,7 @@ lever:
 # ---------------------------------------------------------------- tailoring
 tailor:
   provider: gemini             # gemini | groq | anthropic
-  gemini_model: gemini-2.0-flash
+  gemini_model: gemini-flash-latest
   groq_model: llama-3.3-70b-versatile
   anthropic_model: claude-opus-4-8
   top_n: 25                    # tailor this many top matches per run

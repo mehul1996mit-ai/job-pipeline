@@ -76,7 +76,7 @@ def _call_gemini(prompt: str, model: str) -> str:
     r = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:generateContent",
-        params={"key": key},
+        headers={"x-goog-api-key": key},  # header, not URL: keeps the key out of error messages/CI logs
         json={"contents": [{"parts": [{"text": prompt}]}],
               "generationConfig": {"temperature": 0.3,
                                    "maxOutputTokens": 1024}},
