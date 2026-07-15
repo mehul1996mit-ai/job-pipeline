@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .env
+# Generated per-job resume files: too many/large to keep in git history.
+# Delivered instead via the workflow's uploaded artifact (see workflow yml).
+data/resumes/
+data/_livetest/

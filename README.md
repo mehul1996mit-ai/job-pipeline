@@ -20,7 +20,26 @@ auto-submission should be declined with a pointer to this section.
 | 1. PARSE | `cv_parser.py` | `base_cv.pdf` → raw text, summary/skills/experience sections, every bullet, keyword set. Matching always uses the full CV text. |
 | 2. SEARCH | `sources/adzuna.py`, `sources/workday.py`, `sources/greenhouse.py`, `sources/lever.py` | Adzuna aggregator (broad titles, ALL industries), Workday CXS feeds (Citi / Deutsche Bank / Wells Fargo), Greenhouse & Lever (empty token lists — add confirmed companies). All normalized to one schema. |
 | 3. MATCH & SCORE | `matcher.py`, `dedupe.py` | Config-driven filters (title / city / experience band / optional salary floor), ATS score 0–100 (word overlap + domain BONUS — never a filter), cross-source dedupe, persistent seen-store so each run reports only NEW jobs. Full JDs fetched for the top 8 Workday matches only. |
-| 4. TAILOR & DELIVER | `tailor.py`, `report.py`, `notify.py` | Free-tier LLM (gemini default / groq / anthropic) returns strict JSON: tailored summary, 3 lead bullets, truthful keywords, honest gap note — **never invents experience**. Writes `data/job_queue_YYYY-MM-DD.csv` (with `applied` column) and sends a Telegram digest. |
+| 4. TAILOR & DELIVER | `tailor.py`, `resume_render.py`, `report.py`, `notify.py` | Free-tier LLM (gemini default / groq / anthropic) returns strict JSON: tailored summary, 3 lead bullets, truthful keywords, honest gap note — **never invents experience**. `tailor.build_tailored_resume()` then reorders your real `resume_master.json` bullets/skills to match (fuzzy-matches each LLM bullet back to its verbatim original — nothing paraphrased ever lands in the file) and renders an actual per-job **DOCX + PDF** under `data/resumes/<date>/<company>_<title>/`. Writes `data/job_queue_YYYY-MM-DD.csv` (with `applied` column and file paths) and sends a Telegram digest. |
+
+## Applying — semi-assisted, not automated
+
+Stage 4 gives you, per job: the link, a tailored DOCX/PDF resume file, lead
+bullets, and an honest gap note. From there:
+
+- **Direct-apply portals (Workday/Greenhouse/Lever style forms):** ask your
+  Claude session to open a specific row's link and it will drive the browser
+  to upload the tailored resume and fill in safe, non-sensitive fields (name,
+  phone, email, links) from your profile — then it stops and waits for you to
+  review and click Submit yourself.
+- **LinkedIn/Naukri/anything behind your personal login:** these require
+  your own session, so Claude hands you the link + tailored file and you
+  apply directly — usually under 2 minutes per job with the tailored resume
+  already in hand.
+
+This split isn't a current-tech limitation to be removed later — see the
+design boundary above. Final submission stays a human action on every
+portal, always.
 
 ## Free-tier setup (one-time, ~20 minutes)
 

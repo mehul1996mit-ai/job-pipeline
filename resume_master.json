@@ -1,0 +1,123 @@
+{
+  "name": "MEHUL AGARWAL",
+  "contact_line": "Pune, MH/IN | +91 9591924902 | mehul.a23@mibdu.org | linkedin.com/in/mehulagarwal05/",
+  "summary": "Product Manager with 4+ years building digital lending products in fintech, currently owning the Home Loan digital acquisition stack at Bajaj Finance -- from credit eligibility rules to lead allocation and lending-partner integrations. Operates across both strategic and tactical layers of the role: shaping roadmap and partnership strategy with Business and Credit Policy teams, while running sprint planning, backlog grooming, and specs with Engineering and Design. Previously owned the Personal Loan digital platform end-to-end, from requirements through post-launch iteration. Grounded in data -- uses Google Analytics, CleverTap, and Looker Studio to validate decisions and prioritize the roadmap.",
+  "skills": [
+    {
+      "label": "Product & Delivery",
+      "items": "Product Management, Product Road-mapping, BRDs, SDLC, Agile/Scrum, Stakeholder Management, Release Management, Gap Analysis, UX Design (Figma)"
+    },
+    {
+      "label": "Analytics & Tools",
+      "items": "Google Analytics, CleverTap, Looker Studio, New Relic, A/B Testing, MS-Excel, Azure DevOps, Salesforce"
+    },
+    {
+      "label": "Domain & Growth",
+      "items": "Digital Lending, Fintech, B2C, Performance Marketing, SEO, Facebook/Google Ads, Lead Funnel Optimisation, MCP Frameworks, Lead Allocation Engines, Partner Integrations"
+    }
+  ],
+  "experience": [
+    {
+      "company": "Bajaj Finance",
+      "dates": "Jun 2023 - Present",
+      "roles": [
+        {
+          "title": "Product Manager - Home Loan: Digital Platforms and Consumer AI",
+          "dates": "Dec 2025 - Present",
+          "bullets": [
+            "Own product strategy for Home Loan digital acquisition, translating business and credit-policy requirements into scalable lead-generation and qualification systems.",
+            "Define requirements and drive execution of digital campaign infrastructure across search, social, and paid channels to generate high-quality home loan demand.",
+            "Lead product requirements for strategic NBFC and financial-institution partnerships, designing lead-exchange and commission workflows with legal, business, and tech teams.",
+            "Design and ship the MCP (Minimum Credit Parameters) Master and Lead Allocation Master -- a rules engine that pre-qualifies leads and routes them to the right lending partner based on credit profile, eligibility, and business rules.",
+            "Map and optimize the end-to-end digital home loan funnel -- from awareness and lead generation through login, sanction, and disbursal -- identifying drop-off points and prioritizing fixes."
+          ],
+          "projects": [
+            {
+              "name": "Lead Quality & Allocation Optimization (MCP + Allocation Engine)",
+              "desc": "Implemented MCP-based lead pre-qualification and built a rule-driven allocation engine to route leads to relevant partners, improving lead quality, partner match, and overall conversion efficiency, while optimizing acquisition ROI."
+            },
+            {
+              "name": "Next Best Product Engine (In Progress)",
+              "desc": "Building a framework to recommend alternate loan products when customers fail primary product MCP checks. Evaluates eligibility across related products and uses a propensity model to show the top 3 relevant offers within the same journey."
+            }
+          ]
+        },
+        {
+          "title": "Product Manager: Digital Platforms",
+          "dates": "Jun 2023 - Nov 2025",
+          "bullets": [
+            "Led development and management of digital platforms (app and web) for the Personal Loan product, growing user engagement 27% and user acquisition 14%.",
+            "Served as primary liaison between technical and business stakeholders, driving alignment on requirements and project status throughout the delivery lifecycle.",
+            "Wrote detailed product specifications and requirements in partnership with engineering teams to ensure aligned, on-time delivery.",
+            "Owned end-to-end delivery -- from concept and design through development, testing, deployment, and post-launch support -- ensuring seamless product releases.",
+            "Used Google Analytics and CleverTap to track user behaviour and KPIs, driving data-informed decisions that lifted conversion rates 23%.",
+            "Partnered with UI/UX designers to streamline the application experience, cutting user drop-off rates 40%."
+          ],
+          "projects": [
+            {
+              "name": "Personal Loan Platform Enhancement",
+              "desc": "Spearheaded the complete redesign of the personal loan application process on both app and web platforms, resulting in a 15% reduction in application completion time and a 30% increase in completed applications."
+            },
+            {
+              "name": "GYDE AI Voice Assist - Funnel Optimisation",
+              "desc": "Led end-to-end implementation of AI-driven voice assist within PL forms to guide users and reduce drop-offs, leading to a ~3.5% increase in PL Form-1 submissions."
+            },
+            {
+              "name": "Microfinance Loan: Digital Lead Creation",
+              "desc": "Successfully designed, developed, and launched a streamlined lead creation process for a new product -- Microfinance group loan -- on App and Web platforms, aimed at improving user engagement and increasing lead conversion rates."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "company": "Kantha India",
+      "dates": "May 2019 - Apr 2020",
+      "roles": [
+        {
+          "title": "Digital Marketing Associate",
+          "dates": "",
+          "bullets": [
+            "Managed Instagram Ads and Facebook Ads campaigns, optimizing ad copy and targeting to reduce cost-per-click by 58% and increase ROI by 35%.",
+            "Raised the website's SEO score from 34 to 71 through on-page and off-page optimization and keyword research, driving a 40% increase in organic search traffic.",
+            "Developed content calendars and collaborated with designers to create visually appealing and brand-aligned posts, leading to a 15% increase in click-through rates."
+          ],
+          "projects": []
+        }
+      ]
+    },
+    {
+      "company": "Voxturr Consulting (Internship)",
+      "dates": "Jun 2022 - Jul 2022",
+      "roles": [
+        {
+          "title": "Product Marketing Intern",
+          "dates": "",
+          "bullets": [
+            "Performed in-depth market research for HOC's cloud kitchen operations; developed competitive pricing strategies and identified prime locations with high revenue potential.",
+            "Developed the Go-to-Market strategy for HOC sauces; led the pre-launch marketing campaign, including ad creatives, landing page design, and budget allocation.",
+            "Finalized the user interface and content for the HOC website; implemented SEO best practices, including keyword optimization and internal linking, to enhance search engine visibility."
+          ],
+          "projects": []
+        }
+      ]
+    }
+  ],
+  "achievements": [
+    "Spotlight Award, Bajaj Finance -- Recognised for on-time delivery of the Microfinance Loan Digital Lead Creation project, which drove measurable improvements in lead conversion.",
+    "National Winner - Lakshwiz Bazar 2021 -- Ranked 1st among 460+ teams in the National Marketing Management Case Challenge by NITIE, Mumbai.",
+    "National Finalist - The Perfect Candidate -- Top finalist out of 576 participants in the National General Management Competition by NMIMS, Mumbai."
+  ],
+  "education": [
+    {
+      "school": "Delhi School of Economics",
+      "degree": "Master of Business Administration (MBA) | Marketing & Strategy",
+      "dates": "2021 - 2023"
+    },
+    {
+      "school": "Manipal Institute of Technology",
+      "degree": "Bachelor of Technology (B.Tech)",
+      "dates": "2015 - 2019"
+    }
+  ]
+}

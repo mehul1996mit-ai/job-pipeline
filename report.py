@@ -10,6 +10,7 @@ from pathlib import Path
 
 COLUMNS = ["applied", "score", "title", "company", "location", "url",
            "source", "salary_min", "salary_max", "updated_at",
+           "resume_docx", "resume_pdf",
            "tailored_summary", "bullets_to_lead_with",
            "keywords_to_add_if_true", "honest_gap_note",
            "missing_keywords", "description_snippet"]
@@ -34,6 +35,8 @@ def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
                 "salary_min": j.get("salary_min") or "",
                 "salary_max": j.get("salary_max") or "",
                 "updated_at": j.get("updated_at", ""),
+                "resume_docx": j.get("resume_docx", ""),
+                "resume_pdf": j.get("resume_pdf", ""),
                 "tailored_summary": t.get("tailored_summary", ""),
                 "bullets_to_lead_with":
                     json.dumps(t.get("bullets_to_lead_with", []),

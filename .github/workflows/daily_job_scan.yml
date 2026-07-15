@@ -37,12 +37,14 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
-      - name: Upload job queue CSV as artifact
+      - name: Upload job queue CSV + tailored resumes as artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: job-queue-${{ github.run_id }}
-          path: data/job_queue_*.csv
+          path: |
+            data/job_queue_*.csv
+            data/resumes/**
           if-no-files-found: warn
 
       - name: Commit seen-store back to the repo

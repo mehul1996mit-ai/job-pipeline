@@ -6,11 +6,13 @@ Verifies: (1) real CV parses with bullets + keywords, (2) experience-band
 filter include/exclude cases, (3) title/city/salary filters, (4) dry-run
 ATS scoring + missing-keyword extraction against a sample JD.
 """
+import json
 import sys
 
 import yaml
 
 import matcher
+import tailor
 from cv_parser import parse_cv
 
 PASS, FAIL = "  [PASS]", "  [FAIL]"
@@ -105,6 +107,44 @@ missing = matcher.matched_keywords(SAMPLE_JD, cv.keywords)
 check("missing keywords extracted", len(missing) > 0, f"({missing[:8]})")
 check("noise words filtered from missing keywords",
       all(w not in missing for w in ("the", "and", "experience", "years")))
+
+print("\n== 5. TAILORED RESUME FILE BUILD (offline, no network)")
+master = json.loads(open("resume_master.json", encoding="utf-8").read())
+fake_tailored = {
+    "tailored_summary": "Reworded summary for this job.",
+    "bullets_to_lead_with": [
+        # slightly paraphrased vs the real bullet -- fuzzy match must find it
+        "Used Google Analytics and CleverTap to drive data-informed decisions",
+        "Managed Instagram and Facebook Ads campaigns to cut cost-per-click",
+    ],
+    "keywords_to_add_if_true": ["seo", "facebook ads"],
+    "honest_gap_note": "test",
+}
+tailored_resume = tailor.build_tailored_resume(master, fake_tailored)
+check("summary replaced", tailored_resume["summary"] == fake_tailored["tailored_summary"])
+check("name locked", tailored_resume["name"] == master["name"])
+check("contact locked", tailored_resume["contact_line"] == master["contact_line"])
+
+pl_role = tailored_resume["experience"][0]["roles"][1]  # Digital Platforms role
+check("lead bullet moved to front (Bajaj role)",
+      "Google Analytics and CleverTap" in pl_role["bullets"][0])
+kantha_role = tailored_resume["experience"][1]["roles"][0]
+check("lead bullet moved to front (Kantha role)",
+      "Instagram Ads and Facebook Ads" in kantha_role["bullets"][0])
+check("no bullet text was fabricated (matched bullet is verbatim original)",
+      pl_role["bullets"][0] ==
+      "Used Google Analytics and CleverTap to track user behaviour and KPIs, "
+      "driving data-informed decisions that lifted conversion rates 23%.")
+check("skills reordered toward matched keywords",
+      "seo" in tailored_resume["skills"][0]["items"].lower()
+      or "facebook" in tailored_resume["skills"][0]["items"].lower())
+total_bullets_before = sum(len(r["bullets"]) for c in master["experience"]
+                          for r in c["roles"])
+total_bullets_after = sum(len(r["bullets"]) for c in tailored_resume["experience"]
+                          for r in c["roles"])
+check("no bullets lost or added during reorder",
+      total_bullets_before == total_bullets_after,
+      f"({total_bullets_before} == {total_bullets_after})")
 
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)

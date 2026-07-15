@@ -12,6 +12,8 @@ Output contract (strict JSON):
 """
 from __future__ import annotations
 
+import copy
+import difflib
 import json
 import os
 import re
@@ -178,3 +180,61 @@ def tailor_job(cv_text: str, job: dict, missing_keywords: list[str],
         out["honest_gap_note"] = f"tailoring skipped ({e})"
         return out
     return _extract_json(raw)
+
+
+# ------------------------------------------------------- resume file build
+def _best_bullet_match(candidate: str, resume: dict, threshold: float = 0.35):
+    """Find the ORIGINAL resume bullet closest to an LLM-paraphrased
+    candidate string. Returns (company_idx, role_idx, bullet_idx) or None.
+    Never returns the paraphrase itself -- only a pointer to real CV text,
+    so the rendered resume never contains invented wording."""
+    best = None
+    best_ratio = threshold
+    cand_norm = (candidate or "").lower().strip()
+    if not cand_norm:
+        return None
+    for ci, company in enumerate(resume.get("experience", [])):
+        for ri, role in enumerate(company.get("roles", [])):
+            for bi, bullet in enumerate(role.get("bullets", [])):
+                ratio = difflib.SequenceMatcher(
+                    None, cand_norm, bullet.lower()).ratio()
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best = (ci, ri, bi)
+    return best
+
+
+def build_tailored_resume(master_resume: dict, tailored_fields: dict) -> dict:
+    """Produce a tailored resume dict for file rendering.
+
+    HARD RULE: this only REORDERS content that already exists in
+    master_resume. It never writes LLM-generated prose into the structured
+    resume, except for `summary` (which the tailor prompt is itself
+    constrained to build only from CV facts). Name and contact are locked.
+    """
+    resume = copy.deepcopy(master_resume)
+
+    if tailored_fields.get("tailored_summary"):
+        resume["summary"] = tailored_fields["tailored_summary"]
+
+    # Move the 3 lead bullets to the front of their own role's bullet list.
+    for candidate in tailored_fields.get("bullets_to_lead_with", []) or []:
+        match = _best_bullet_match(candidate, resume)
+        if not match:
+            continue
+        ci, ri, bi = match
+        bullets = resume["experience"][ci]["roles"][ri]["bullets"]
+        bullets.insert(0, bullets.pop(bi))
+
+    # Reorder skill groups so the ones matching JD keywords surface first.
+    keywords = [k.lower() for k in
+               (tailored_fields.get("keywords_to_add_if_true") or [])]
+    if keywords and resume.get("skills"):
+        def hits(group):
+            items = group.get("items", "").lower()
+            return sum(1 for k in keywords if k in items)
+        resume["skills"] = sorted(resume["skills"], key=hits, reverse=True)
+
+    resume["name"] = master_resume["name"]
+    resume["contact_line"] = master_resume["contact_line"]
+    return resume
