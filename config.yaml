@@ -1,0 +1,97 @@
+# ------------------------------------------------------------------ profile
+profile:
+  experience_years: 4          # used for experience-band overlap checks
+
+# --------------------------------------------------------------- job search
+search:
+  # Broad, generic title searches across ALL industries (Adzuna + Workday
+  # matching downstream is done against the full CV, not these strings).
+  titles:
+    - Product Manager
+    - Senior Product Manager
+    - Business Analyst
+    - Senior Business Analyst
+    - Partnership Manager
+    - Alliance Manager
+    - Program Manager
+    - Growth Manager
+    - Product Owner
+
+# ------------------------------------------------------------------ filters
+filters:
+  # A listing passes if ANY of these appears in its title (case-insensitive).
+  title_keywords:
+    - product manager
+    - product owner
+    - business analyst
+    - program manager
+    - growth manager
+    - growth lead
+    - partnership
+    - alliance
+  # City allowlist. Empty list = accept all cities. "remote" always passes.
+  cities:
+    - pune
+    - mumbai
+    - bangalore
+    - bengaluru
+    - remote
+  # Annual INR. Enforced ONLY when the listing itself reports a salary.
+  # Set to null to disable.
+  min_salary_annual: null
+
+# ------------------------------------------------------------------ scoring
+scoring:
+  # Domain keywords add up to 20 BONUS points. They are never a filter --
+  # strong matches from other industries must not be excluded.
+  domain_keywords:
+    - lending
+    - credit
+    - nbfc
+    - fintech
+    - loan
+    - bfsi
+    - digital banking
+
+# ------------------------------------------------------------------ sources
+adzuna:
+  country: in
+  results_per_page: 50
+  max_pages_per_title: 2       # polite pagination
+
+workday:
+  page_size: 20                # small pages, one poll per run
+  detail_top_n: 8              # fetch full JDs for top N matches only
+  tenants:
+    - tenant: citi
+      server: wd5
+      site: "2"
+      searches: ["product manager", "business analyst"]
+    - tenant: db
+      server: wd3
+      site: DBWebsite
+      searches: ["product manager", "business analyst"]
+    - tenant: wf
+      server: wd1
+      site: WellsFargoJobs
+      searches: ["product manager", "business analyst"]
+
+greenhouse:
+  # Add ONLY confirmed board tokens, e.g. - razorpaysoftwareprivatelimited
+  tokens: []
+
+lever:
+  # Add ONLY confirmed company tokens, e.g. - postman
+  tokens: []
+
+# ---------------------------------------------------------------- tailoring
+tailor:
+  provider: gemini             # gemini | groq | anthropic
+  gemini_model: gemini-2.0-flash
+  groq_model: llama-3.3-70b-versatile
+  anthropic_model: claude-opus-4-8
+  top_n: 25                    # tailor this many top matches per run
+
+# ------------------------------------------------------------------- digest
+digest:
+  top_n: 15                    # jobs in the Telegram digest
