@@ -226,5 +226,38 @@ all_items_after = sorted(
 check("no skill items added/removed/renamed by reorder",
       all_items_before == all_items_after)
 
+print("\n== 7. CHANGE LOG / PORTAL PRIORITY / REMOTE-ONLY")
+cl = tailor.change_log(master, rw_resume)
+check("change log reports reworded bullet",
+      "1 bullet(s) reworded" in cl, f"({cl})")
+check("change log reports skill resequencing",
+      "Skill items resequenced" in cl)
+check("unchanged resume -> 'No changes' log",
+      tailor.change_log(master, master) == "No changes vs base CV")
+
+import dedupe
+dup_jobs = [
+    {"source": "adzuna", "company": "Citi", "title": "Senior BA",
+     "location": "Pune", "url": "adz"},
+    {"source": "workday", "company": "Citi", "title": "Senior BA",
+     "location": "Pune", "url": "wd"},
+]
+kept = dedupe.dedupe_cross_source(dup_jobs)
+check("cross-source dupe keeps DIRECT employer ATS over aggregator",
+      len(kept) == 1 and kept[0]["source"] == "workday")
+check("apply_channel tagged", kept[0].get("apply_channel") == "direct")
+
+remote_cfg = {"filters": {"title_keywords": ["product manager"],
+                          "cities": [], "remote_only": True},
+              "profile": {"experience_years": 4}}
+check("remote_only drops on-site listing",
+      not matcher.passes_filters(
+          {"title": "Product Manager", "location": "Pune, MH",
+           "description": ""}, remote_cfg))
+check("remote_only keeps remote listing",
+      matcher.passes_filters(
+          {"title": "Product Manager", "location": "Remote - India",
+           "description": ""}, remote_cfg))
+
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)

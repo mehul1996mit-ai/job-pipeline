@@ -9,11 +9,13 @@ from datetime import date
 from pathlib import Path
 
 COLUMNS = ["applied", "score", "title", "company", "location", "url",
-           "source", "salary_min", "salary_max", "updated_at",
-           "resume_docx", "resume_pdf",
+           "source", "apply_channel", "salary_min", "salary_max",
+           "updated_at", "resume_docx", "resume_pdf",
            "tailored_summary", "bullets_to_lead_with",
            "rewritten_bullets",
-           "keywords_to_add_if_true", "honest_gap_note",
+           "keywords_to_add_if_true",
+           "fit_exact", "fit_partial", "fit_gaps",
+           "outreach_note", "change_log", "honest_gap_note",
            "missing_keywords", "description_snippet"]
 
 
@@ -25,6 +27,7 @@ def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
         w.writeheader()
         for j in jobs:
             t = j.get("tailored", {}) or {}
+            fit = t.get("fit_analysis") or {}
             w.writerow({
                 "applied": "no",
                 "score": j.get("score", ""),
@@ -33,6 +36,7 @@ def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
                 "location": j.get("location", ""),
                 "url": j.get("url", ""),
                 "source": j.get("source", ""),
+                "apply_channel": j.get("apply_channel", ""),
                 "salary_min": j.get("salary_min") or "",
                 "salary_max": j.get("salary_max") or "",
                 "updated_at": j.get("updated_at", ""),
@@ -48,10 +52,21 @@ def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
                 "keywords_to_add_if_true":
                     json.dumps(t.get("keywords_to_add_if_true", []),
                                ensure_ascii=False),
+                "fit_exact":
+                    json.dumps(fit.get("exact_matches", []),
+                               ensure_ascii=False),
+                "fit_partial":
+                    json.dumps(fit.get("partial_matches", []),
+                               ensure_ascii=False),
+                "fit_gaps":
+                    json.dumps(fit.get("gaps", []), ensure_ascii=False),
+                "outreach_note": t.get("outreach_note", ""),
+                "change_log": j.get("change_log", ""),
                 "honest_gap_note": t.get("honest_gap_note", ""),
                 "missing_keywords":
                     ", ".join(j.get("missing_keywords", [])),
+                # long enough for the UI's on-demand tailoring to work with
                 "description_snippet":
-                    (j.get("description") or "")[:400],
+                    (j.get("description") or "")[:2000],
             })
     return path

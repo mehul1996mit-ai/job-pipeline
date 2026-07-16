@@ -14,6 +14,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+import pdfplumber
 import yaml
 
 import dedupe
@@ -130,6 +131,15 @@ def main():
             resume_render.build_pdf(tailored_resume, str(pdf_path))
             j["resume_docx"] = str(docx_path)
             j["resume_pdf"] = str(pdf_path)
+            j["change_log"] = tailor_mod.change_log(master_resume,
+                                                    tailored_resume)
+            # 2-page guard: tailoring only rewords/reorders so length should
+            # hold, but verify the rendered PDF rather than assume.
+            with pdfplumber.open(str(pdf_path)) as _pdf:
+                if len(_pdf.pages) > 2:
+                    log(f"   WARNING: tailored resume for '{j['title']}' "
+                        f"is {len(_pdf.pages)} pages (max 2) — review it")
+                    j["change_log"] += "; WARNING: exceeds 2 pages"
         except Exception as e:
             log(f"   resume render failed for '{j['title']}' ({e})")
             j["resume_docx"] = j["resume_pdf"] = ""

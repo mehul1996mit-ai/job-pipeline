@@ -23,14 +23,27 @@ def job_hash(job: dict) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
+# When the same job appears on multiple sources, keep the DIRECT
+# apply channel: employer ATS feeds (Workday/Greenhouse/Lever) beat
+# aggregator redirects (Adzuna). Direct applications land in the
+# employer's own ATS immediately and avoid an extra redirect hop.
+SOURCE_PRIORITY = {"workday": 0, "greenhouse": 0, "lever": 0, "adzuna": 5}
+
+
 def dedupe_cross_source(jobs: list[dict]) -> list[dict]:
+    ranked = sorted(jobs, key=lambda j: SOURCE_PRIORITY.get(
+        j.get("source", ""), 9))
     seen, out = set(), []
-    for job in jobs:
+    for job in ranked:
         h = job_hash(job)
         if h in seen:
             continue
         seen.add(h)
         job["hash"] = h
+        job["apply_channel"] = ("direct"
+                                if SOURCE_PRIORITY.get(job.get("source", ""),
+                                                       9) < 5
+                                else "aggregator")
         out.append(job)
     return out
 

@@ -43,6 +43,8 @@ filters:
   # CSV/digest for visibility, but are NOT tailored -- no point investing a
   # tailored resume in a weak fit. Raise for stricter targeting.
   min_score_to_tailor: 55
+  # true = only remote / work-from-home listings pass.
+  remote_only: false
 
 # ------------------------------------------------------------------ scoring
 scoring:

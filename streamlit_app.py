@@ -92,12 +92,45 @@ with tab_queue:
         master = json.loads(
             (ROOT / "resume_master.json").read_text(encoding="utf-8"))
         for _, row in tailored_df.iterrows():
+            channel = row.get("apply_channel", "")
+            badge = " 🎯direct-apply" if channel == "direct" else ""
             with st.expander(
                     f"⭐ {row['score']} — {row['title']} @ {row['company']} "
-                    f"({row['location']})"):
-                st.markdown(f"[Open job posting]({row['url']})")
+                    f"({row['location']}){badge}"):
+                st.markdown(f"[Open job posting]({row['url']})"
+                            + (" — **direct employer ATS** (preferred: no "
+                               "aggregator hop)" if channel == "direct"
+                               else ""))
                 st.markdown(f"**Tailored summary:** "
                             f"{row['tailored_summary']}")
+
+                fe = json.loads(row.get("fit_exact") or "[]")
+                fp = json.loads(row.get("fit_partial") or "[]")
+                fg = json.loads(row.get("fit_gaps") or "[]")
+                if fe or fp or fg:
+                    fc1, fc2, fc3 = st.columns(3)
+                    with fc1:
+                        st.markdown("**✅ Exact match**")
+                        for x in fe:
+                            st.markdown(f"- {x}")
+                    with fc2:
+                        st.markdown("**🟡 Partial**")
+                        for x in fp:
+                            st.markdown(f"- {x}")
+                    with fc3:
+                        st.markdown("**❌ Gap**")
+                        for x in fg:
+                            st.markdown(f"- {x}")
+
+                cl = row.get("change_log", "")
+                if cl:
+                    st.info(f"**Changes vs base CV:** {cl}")
+                outreach = row.get("outreach_note", "")
+                if outreach:
+                    st.markdown("**Recruiter outreach draft** "
+                                "(copy, personalize the name, send it "
+                                "yourself):")
+                    st.code(outreach, language=None)
                 gap = row.get("honest_gap_note", "")
                 if gap:
                     st.warning(f"Honest gap note: {gap}")
@@ -138,6 +171,70 @@ with tab_queue:
                         key=f"pdf{row['url']}")
                 except Exception as e:
                     st.error(f"Resume render failed: {e}")
+
+        st.subheader("Tailor any other job on demand")
+        untailored = df[df["tailored_summary"] == ""]
+        if untailored.empty:
+            st.caption("Every job in this queue is already tailored.")
+        elif not secret_or_env("GEMINI_API_KEY"):
+            st.caption("Set GEMINI_API_KEY (secrets or environment) to "
+                       "enable on-demand tailoring.")
+        else:
+            options = {
+                f"[{r['score']}] {r['title']} @ {r['company']} "
+                f"({r['location']})": idx
+                for idx, r in untailored.iterrows()}
+            pick = st.selectbox("Job (below the auto-tailor score floor, "
+                                "or beyond the daily top-N)",
+                                list(options))
+            if st.button("🎯 Tailor this job now"):
+                os.environ["GEMINI_API_KEY"] = secret_or_env(
+                    "GEMINI_API_KEY")
+                idx = options[pick]
+                row = df.loc[idx]
+                import matcher
+                from cv_parser import parse_cv
+                cv = parse_cv(ROOT / "base_cv.pdf")
+                job = {"title": row["title"], "company": row["company"],
+                       "description": row.get("description_snippet", "")}
+                with st.spinner("Tailoring..."):
+                    t = tailor_mod.tailor_job(
+                        cv.raw_text, job,
+                        matcher.matched_keywords(job["description"],
+                                                 cv.keywords),
+                        load_config(), log=st.write)
+                if not t.get("tailored_summary"):
+                    st.error("Tailoring returned nothing usable — "
+                             f"note: {t.get('honest_gap_note', '')}")
+                else:
+                    fit = t.get("fit_analysis") or {}
+                    df.loc[idx, "tailored_summary"] = t["tailored_summary"]
+                    df.loc[idx, "bullets_to_lead_with"] = json.dumps(
+                        t.get("bullets_to_lead_with", []),
+                        ensure_ascii=False)
+                    df.loc[idx, "rewritten_bullets"] = json.dumps(
+                        t.get("rewritten_bullets", []), ensure_ascii=False)
+                    df.loc[idx, "keywords_to_add_if_true"] = json.dumps(
+                        t.get("keywords_to_add_if_true", []),
+                        ensure_ascii=False)
+                    df.loc[idx, "fit_exact"] = json.dumps(
+                        fit.get("exact_matches", []), ensure_ascii=False)
+                    df.loc[idx, "fit_partial"] = json.dumps(
+                        fit.get("partial_matches", []), ensure_ascii=False)
+                    df.loc[idx, "fit_gaps"] = json.dumps(
+                        fit.get("gaps", []), ensure_ascii=False)
+                    df.loc[idx, "outreach_note"] = t.get("outreach_note",
+                                                         "")
+                    df.loc[idx, "honest_gap_note"] = t.get(
+                        "honest_gap_note", "")
+                    resume = tailor_mod.build_tailored_resume(
+                        master, t, jd_text=job["description"])
+                    df.loc[idx, "change_log"] = tailor_mod.change_log(
+                        master, resume)
+                    df.to_csv(chosen, index=False, encoding="utf-8-sig")
+                    st.success("Tailored and saved to the queue — "
+                               "reloading...")
+                    st.rerun()
 
 # ------------------------------------------------------------------ Run now
 with tab_run:
@@ -199,12 +296,15 @@ with tab_filters:
         int(cfg["profile"].get("experience_years", 4)))
     top_n = st.slider("Tailor top N per run", 5, 50,
                       int(cfg["tailor"].get("top_n", 25)))
+    remote_only = st.checkbox("Remote-only (drop all on-site/hybrid "
+                              "listings)", value=bool(f.get("remote_only")))
     if st.button("💾 Save filters"):
         f["title_keywords"] = [s.strip() for s in title_kw.splitlines()
                                if s.strip()]
         f["cities"] = [s.strip() for s in cities.splitlines() if s.strip()]
         f["min_salary_annual"] = min_salary or None
         f["min_score_to_tailor"] = score_floor
+        f["remote_only"] = remote_only
         cfg["profile"]["experience_years"] = exp_years
         cfg["tailor"]["top_n"] = top_n
         with open(ROOT / "config.yaml", "w", encoding="utf-8") as fh:

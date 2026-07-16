@@ -71,6 +71,10 @@ def salary_ok(job: dict, min_salary_annual) -> bool:
 def passes_filters(job: dict, config: dict) -> bool:
     f = config.get("filters", {})
     my_years = float(config.get("profile", {}).get("experience_years", 0))
+    if f.get("remote_only"):
+        loc = (job.get("location", "") + " " + job.get("title", "")).lower()
+        if "remote" not in loc and "work from home" not in loc:
+            return False
     return (
         title_ok(job.get("title", ""), f.get("title_keywords", []))
         and city_ok(job.get("location", ""), f.get("cities", []))

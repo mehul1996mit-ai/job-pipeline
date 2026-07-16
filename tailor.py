@@ -48,6 +48,12 @@ these keys:
       "rewritten": "<the same accomplishment reworded to mirror this JD's vocabulary. RULES: keep every number/metric/percentage unchanged; add no new numbers; add no tools, employers, domains, or claims not in the original; similar length>"}}
   ],
   "keywords_to_add_if_true": ["only keywords genuinely supported by the CV"],
+  "fit_analysis": {{
+    "exact_matches": ["JD requirements the CV clearly demonstrates"],
+    "partial_matches": ["JD requirements the CV partially supports — say what's there and what's thin"],
+    "gaps": ["JD requirements the CV does not demonstrate at all"]
+  }},
+  "outreach_note": "a 2-3 sentence LinkedIn message to the recruiter/hiring manager for this role: specific to this job, references 1-2 real CV facts, no flattery filler, no fabrication, under 300 characters",
   "honest_gap_note": "one sentence: what this JD asks for that the CV does not demonstrate"
 }}
 
@@ -60,7 +66,9 @@ original lacks will be rejected."""
 
 EMPTY = {"tailored_summary": "", "bullets_to_lead_with": [],
          "rewritten_bullets": [], "keywords_to_add_if_true": [],
-         "honest_gap_note": ""}
+         "fit_analysis": {"exact_matches": [], "partial_matches": [],
+                          "gaps": []},
+         "outreach_note": "", "honest_gap_note": ""}
 
 
 def _extract_json(text: str) -> dict:
@@ -314,3 +322,45 @@ def build_tailored_resume(master_resume: dict, tailored_fields: dict,
     resume["name"] = master_resume["name"]
     resume["contact_line"] = master_resume["contact_line"]
     return resume
+
+
+def change_log(master_resume: dict, tailored_resume: dict) -> str:
+    """Deterministic what-changed summary, computed by DIFFING the two
+    resumes (never trusting LLM claims about what it changed)."""
+    lines = []
+    if tailored_resume.get("summary") != master_resume.get("summary"):
+        lines.append("Summary rewritten for this JD")
+
+    def flat(resume):
+        return [(c["company"], r["title"], r["bullets"])
+                for c in resume["experience"] for r in c["roles"]]
+
+    reworded, reordered_roles = 0, []
+    for (co, title, base_b), (_, _, tail_b) in zip(flat(master_resume),
+                                                   flat(tailored_resume)):
+        base_set, tail_set = set(base_b), set(tail_b)
+        reworded += len(tail_set - base_set)
+        if base_set == tail_set and base_b != tail_b:
+            reordered_roles.append(title.split(":")[0].strip())
+        elif base_set != tail_set and \
+                [b for b in base_b if b in tail_set] != \
+                [b for b in tail_b if b in base_set]:
+            reordered_roles.append(title.split(":")[0].strip())
+    if reworded:
+        lines.append(f"{reworded} bullet(s) reworded to JD vocabulary "
+                     "(metrics preserved verbatim)")
+    if reordered_roles:
+        lines.append("Bullets reprioritized in: "
+                     + ", ".join(sorted(set(reordered_roles))))
+
+    base_groups = [g["label"] for g in master_resume.get("skills", [])]
+    tail_groups = [g["label"] for g in tailored_resume.get("skills", [])]
+    if base_groups != tail_groups:
+        lines.append(f"Skill groups reordered ({tail_groups[0]} first)")
+    base_items = {g["label"]: g["items"]
+                  for g in master_resume.get("skills", [])}
+    if any(base_items.get(g["label"]) != g["items"]
+           for g in tailored_resume.get("skills", [])):
+        lines.append("Skill items resequenced toward JD mentions")
+
+    return "; ".join(lines) if lines else "No changes vs base CV"
