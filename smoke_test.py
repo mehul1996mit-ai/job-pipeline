@@ -146,5 +146,33 @@ check("no bullets lost or added during reorder",
       total_bullets_before == total_bullets_after,
       f"({total_bullets_before} == {total_bullets_after})")
 
+# Regression: two lead bullets landing in the SAME role must preserve the
+# LLM's priority order (1st listed ends up 1st), not get silently reversed.
+same_role_fields = {
+    "tailored_summary": "",
+    # The tailor prompt instructs the LLM to return bullets VERBATIM (not
+    # paraphrased), so realistic candidates are near-exact copies of the
+    # source bullet -- that's what we test the priority-order fix against.
+    "bullets_to_lead_with": [
+        # both match bullets inside Bajaj's "Home Loan" role, in this order
+        "Own product strategy for Home Loan digital acquisition, "
+        "translating business and credit-policy requirements into "
+        "scalable lead-generation and qualification systems.",
+        "Design and ship the MCP (Minimum Credit Parameters) Master and "
+        "Lead Allocation Master -- a rules engine that pre-qualifies "
+        "leads and routes them to the right lending partner based on "
+        "credit profile, eligibility, and business rules.",
+    ],
+    "keywords_to_add_if_true": [],
+}
+same_role_resume = tailor.build_tailored_resume(master, same_role_fields)
+hl_role = same_role_resume["experience"][0]["roles"][0]
+check("same-role priority order preserved (1st listed lead bullet is 1st)",
+      hl_role["bullets"][0].startswith("Own product strategy"),
+      f"(got: \"{hl_role['bullets'][0][:60]}...\")")
+check("same-role 2nd priority in 2nd position",
+      hl_role["bullets"][1].startswith("Design and ship the MCP"),
+      f"(got: \"{hl_role['bullets'][1][:60]}...\")")
+
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)

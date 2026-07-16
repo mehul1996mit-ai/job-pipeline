@@ -5,3 +5,4 @@ __pycache__/
 # Delivered instead via the workflow's uploaded artifact (see workflow yml).
 data/resumes/
 data/_livetest/
+data/_demo/

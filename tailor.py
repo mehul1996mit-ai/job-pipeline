@@ -187,7 +187,14 @@ def _best_bullet_match(candidate: str, resume: dict, threshold: float = 0.35):
     """Find the ORIGINAL resume bullet closest to an LLM-paraphrased
     candidate string. Returns (company_idx, role_idx, bullet_idx) or None.
     Never returns the paraphrase itself -- only a pointer to real CV text,
-    so the rendered resume never contains invented wording."""
+    so the rendered resume never contains invented wording.
+
+    The tailor prompt instructs the LLM to return bullets verbatim, so in
+    practice candidates are near-exact copies of the source (high ratio).
+    If a candidate is unusually short/compressed and falls below
+    `threshold`, the match is safely skipped -- that bullet's position is
+    left unchanged rather than guessed at, so a low-confidence match can
+    never reorder the wrong content."""
     best = None
     best_ratio = threshold
     cand_norm = (candidate or "").lower().strip()
@@ -217,8 +224,14 @@ def build_tailored_resume(master_resume: dict, tailored_fields: dict) -> dict:
     if tailored_fields.get("tailored_summary"):
         resume["summary"] = tailored_fields["tailored_summary"]
 
-    # Move the 3 lead bullets to the front of their own role's bullet list.
-    for candidate in tailored_fields.get("bullets_to_lead_with", []) or []:
+    # Move the lead bullets to the front of their own role's bullet list.
+    # Process in REVERSE: each insert(0, ...) pushes prior inserts down one
+    # slot, so processing last-to-first leaves the FIRST candidate (the
+    # LLM's top priority pick) sitting at position 0 once all are placed.
+    # (Forward-order insertion silently reverses the intended priority
+    # whenever two lead bullets land in the same role.)
+    lead_bullets = tailored_fields.get("bullets_to_lead_with", []) or []
+    for candidate in reversed(lead_bullets):
         match = _best_bullet_match(candidate, resume)
         if not match:
             continue
