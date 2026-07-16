@@ -3,3 +3,5 @@ requests
 PyYAML
 python-docx
 reportlab
+streamlit
+pandas

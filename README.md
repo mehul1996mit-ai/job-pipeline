@@ -22,6 +22,39 @@ auto-submission should be declined with a pointer to this section.
 | 3. MATCH & SCORE | `matcher.py`, `dedupe.py` | Config-driven filters (title / city / experience band / optional salary floor), ATS score 0–100 (word overlap + domain BONUS — never a filter), cross-source dedupe, persistent seen-store so each run reports only NEW jobs. Full JDs fetched for the top 8 Workday matches only. |
 | 4. TAILOR & DELIVER | `tailor.py`, `resume_render.py`, `report.py`, `notify.py` | Free-tier LLM (gemini default / groq / anthropic) returns strict JSON: tailored summary, lead bullets, **JD-vocabulary bullet rewrites**, truthful keywords, honest gap note — **never invents experience**. `tailor.build_tailored_resume()` applies: bullet reorder, validated rewording (every rewrite must keep all numbers/metrics identical and stay in a sane length band, else the original wording is kept), skill-group reorder, and skill-item reorder toward JD mentions. Only jobs scoring ≥ `filters.min_score_to_tailor` get tailored — weak fits stay visible in the CSV but don't get a resume. Renders per-job **DOCX + PDF** under `data/resumes/<date>/<company>_<title>/`, writes `data/job_queue_YYYY-MM-DD.csv`, and sends a Telegram digest. |
 
+## Web UI (Streamlit)
+
+`streamlit_app.py` gives the pipeline a dashboard:
+
+- **Review queue** — pick any day's queue, see scores/links, flip an
+  `applied` status per job, and for every tailored match: the tailored
+  summary, validated JD-aligned rewording, the honest gap note, and
+  one-click **DOCX/PDF downloads** (rebuilt deterministically from the CSV —
+  no LLM call, works even for queues produced by the cloud run).
+- **Run now** — trigger a full scan on demand with live logs (keys read
+  from Streamlit secrets or environment; missing keys just skip that step).
+- **Filters** — edit title keywords, cities, salary floor, fit-score floor,
+  experience years, and tailor count; saves `config.yaml`.
+
+Run locally: `streamlit run streamlit_app.py`
+
+Host free: [share.streamlit.io](https://share.streamlit.io) → New app →
+this repo / `main` / `streamlit_app.py` (works with private repos via the
+GitHub authorization). Add the same five keys under **App settings →
+Secrets**:
+
+```toml
+ADZUNA_APP_ID = "..."
+ADZUNA_APP_KEY = "..."
+GEMINI_API_KEY = "..."
+TELEGRAM_BOT_TOKEN = "..."
+TELEGRAM_CHAT_ID = "..."
+```
+
+Because the daily GitHub Actions run commits each day's queue CSV back to
+the repo, Streamlit Cloud auto-redeploys and the dashboard always shows the
+latest scan without the app itself doing any scheduled work.
+
 ## Applying — semi-assisted, not automated
 
 Stage 4 gives you, per job: the link, a tailored DOCX/PDF resume file, lead

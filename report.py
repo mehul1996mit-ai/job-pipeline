@@ -12,6 +12,7 @@ COLUMNS = ["applied", "score", "title", "company", "location", "url",
            "source", "salary_min", "salary_max", "updated_at",
            "resume_docx", "resume_pdf",
            "tailored_summary", "bullets_to_lead_with",
+           "rewritten_bullets",
            "keywords_to_add_if_true", "honest_gap_note",
            "missing_keywords", "description_snippet"]
 
@@ -40,6 +41,9 @@ def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
                 "tailored_summary": t.get("tailored_summary", ""),
                 "bullets_to_lead_with":
                     json.dumps(t.get("bullets_to_lead_with", []),
+                               ensure_ascii=False),
+                "rewritten_bullets":
+                    json.dumps(t.get("rewritten_bullets", []),
                                ensure_ascii=False),
                 "keywords_to_add_if_true":
                     json.dumps(t.get("keywords_to_add_if_true", []),
