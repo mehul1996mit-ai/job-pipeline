@@ -22,7 +22,10 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (job-pipeline; personal job search tool)",
 }
 
-COMPANY_NAMES = {"citi": "Citi", "db": "Deutsche Bank", "wf": "Wells Fargo"}
+COMPANY_NAMES = {"citi": "Citi", "db": "Deutsche Bank", "wf": "Wells Fargo",
+                 "mastercard": "Mastercard", "paypal": "PayPal",
+                 "statestreet": "State Street", "blackrock": "BlackRock",
+                 "adobe": "Adobe", "salesforce": "Salesforce"}
 
 
 def _base(tenant_cfg):

@@ -259,5 +259,42 @@ check("remote_only keeps remote listing",
           {"title": "Product Manager", "location": "Remote - India",
            "description": ""}, remote_cfg))
 
+print("\n== 8. FOLLOW-UP TRACKER / WEEKLY STATS (offline)")
+from datetime import date, timedelta
+import tracker
+
+today = date(2026, 7, 16)
+old = (today - timedelta(days=8)).isoformat()
+fresh = (today - timedelta(days=2)).isoformat()
+rows = [
+    {"applied": "yes", "url": "u1", "title": "PM", "company": "A",
+     "applied_on": old, "_queue_date": old, "score": "82",
+     "source": "adzuna", "tailored_summary": "x"},
+    {"applied": "yes", "url": "u2", "title": "BA", "company": "B",
+     "applied_on": fresh, "_queue_date": fresh, "score": "70",
+     "source": "workday", "tailored_summary": "x"},
+    {"applied": "response", "url": "u3", "title": "PM", "company": "C",
+     "applied_on": old, "_queue_date": old, "score": "85",
+     "source": "workday", "tailored_summary": "x"},
+    {"applied": "no", "url": "u4", "title": "PM", "company": "D",
+     "applied_on": "", "_queue_date": old, "score": "60",
+     "source": "adzuna", "tailored_summary": ""},
+]
+due = tracker.followups_due(rows, days=7, today=today)
+check("8-day-old 'yes' is due for follow-up",
+      any(r["url"] == "u1" for r in due))
+check("2-day-old 'yes' NOT due", not any(r["url"] == "u2" for r in due))
+check("row with recorded outcome NOT nudged",
+      not any(r["url"] == "u3" for r in due))
+check("unapplied row NOT nudged", not any(r["url"] == "u4" for r in due))
+due2 = tracker.followups_due(rows, days=7, today=today,
+                             already={"u1": "2026-07-15"})
+check("already-nudged application not nudged twice", len(due2) == 0)
+
+stats = tracker.weekly_stats(rows)
+check("stats reports applied count", "applied: 3" in stats)
+check("stats reports positive-response rate", "1/3" in stats)
+check("stats breaks down by score band", "80+" in stats)
+
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)

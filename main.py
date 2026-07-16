@@ -23,6 +23,7 @@ import notify
 import report
 import resume_render
 import tailor as tailor_mod
+import tracker
 from cv_parser import parse_cv, keyword_set
 from sources import adzuna, greenhouse, lever, workday
 
@@ -151,6 +152,11 @@ def main():
     log(f"   wrote {csv_path}")
 
     notify.send_digest(new_jobs, config, log=log)
+
+    # Follow-up nudges daily; weekly stats digest on Sundays.
+    tracker.send_followups(config, log=log)
+    if date.today().weekday() == 6:
+        tracker.send_weekly_stats(config, log=log)
 
     dedupe.save_seen(dedupe.mark_seen(new_jobs, seen))
     log(f"   seen-store updated ({len(seen)} total entries)")

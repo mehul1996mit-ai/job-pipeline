@@ -81,6 +81,30 @@ workday:
       server: wd1
       site: WellsFargoJobs
       searches: ["product manager", "business analyst"]
+    - tenant: mastercard
+      server: wd1
+      site: CorporateCareers
+      searches: ["product manager", "business analyst"]
+    - tenant: paypal
+      server: wd1
+      site: jobs
+      searches: ["product manager", "business analyst"]
+    - tenant: statestreet
+      server: wd1
+      site: Global
+      searches: ["product manager", "business analyst"]
+    - tenant: blackrock
+      server: wd1
+      site: BlackRock_Professional
+      searches: ["product manager", "business analyst"]
+    - tenant: adobe
+      server: wd5
+      site: external_experienced
+      searches: ["product manager", "business analyst"]
+    - tenant: salesforce
+      server: wd12
+      site: External_Career_Site
+      searches: ["product manager", "business analyst"]
 
 greenhouse:
   # Add ONLY confirmed board tokens, e.g. - razorpaysoftwareprivatelimited
@@ -101,3 +125,4 @@ tailor:
 # ------------------------------------------------------------------- digest
 digest:
   top_n: 15                    # jobs in the Telegram digest
+  followup_days: 7             # nudge after N days with no recorded response

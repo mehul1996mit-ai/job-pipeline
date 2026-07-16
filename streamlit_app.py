@@ -69,12 +69,20 @@ with tab_queue:
         c3.metric("Marked applied", int((df["applied"] == "yes").sum()))
 
         st.subheader("Full queue")
+        st.caption("Status flow: no → yes (applied) → response / interview "
+                   "/ rejected / offer. Plain 'yes' rows with no outcome "
+                   "get a Telegram follow-up nudge after 7 days.")
+        if "applied_on" not in df.columns:
+            df["applied_on"] = ""
         edited = st.data_editor(
             df[["applied", "score", "title", "company", "location",
                 "source", "url"]],
             column_config={
                 "applied": st.column_config.SelectboxColumn(
-                    "applied", options=["no", "yes", "skip"], width="small"),
+                    "applied",
+                    options=["no", "yes", "skip", "response", "interview",
+                             "rejected", "offer"],
+                    width="small"),
                 "url": st.column_config.LinkColumn("link"),
                 "score": st.column_config.NumberColumn(width="small"),
             },
@@ -82,11 +90,19 @@ with tab_queue:
                       "url"],
             hide_index=True, use_container_width=True, height=380)
         if st.button("💾 Save applied-status changes"):
+            from datetime import date as _date
+            newly_applied = (df["applied"].isin(["no", "skip"])
+                             & ~edited["applied"].isin(["no", "skip"]))
+            df.loc[newly_applied, "applied_on"] = _date.today().isoformat()
             df["applied"] = edited["applied"]
             df.to_csv(chosen, index=False, encoding="utf-8-sig")
-            st.success("Saved. (On Streamlit Cloud this persists until the "
-                       "next redeploy — the CSV in the repo is the durable "
-                       "copy.)")
+            st.success("Saved. Commit/push the CSV if you want the cloud "
+                       "follow-up nudges to see these statuses.")
+
+        st.subheader("📈 Stats so far")
+        import tracker as tracker_mod
+        st.text(tracker_mod.weekly_stats(
+            tracker_mod.load_queue_rows(str(DATA))))
 
         st.subheader("Tailored matches — detail & resume files")
         master = json.loads(

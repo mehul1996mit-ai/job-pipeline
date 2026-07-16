@@ -18,9 +18,22 @@ auto-submission should be declined with a pointer to this section.
 | Stage | Module(s) | What happens |
 |---|---|---|
 | 1. PARSE | `cv_parser.py` | `base_cv.pdf` → raw text, summary/skills/experience sections, every bullet, keyword set. Matching always uses the full CV text. |
-| 2. SEARCH | `sources/adzuna.py`, `sources/workday.py`, `sources/greenhouse.py`, `sources/lever.py` | Adzuna aggregator (broad titles, ALL industries), Workday CXS feeds (Citi / Deutsche Bank / Wells Fargo), Greenhouse & Lever (empty token lists — add confirmed companies). All normalized to one schema. |
+| 2. SEARCH | `sources/adzuna.py`, `sources/workday.py`, `sources/greenhouse.py`, `sources/lever.py` | Adzuna aggregator (broad titles, ALL industries) + Workday CXS feeds for 9 employers (Citi, Deutsche Bank, Wells Fargo, Mastercard, PayPal, State Street, BlackRock, Adobe, Salesforce — all probed and confirmed publicly open) + Greenhouse & Lever (empty token lists — add confirmed companies). Cross-source duplicates keep the DIRECT employer-ATS link over aggregator redirects. All normalized to one schema. |
 | 3. MATCH & SCORE | `matcher.py`, `dedupe.py` | Config-driven filters (title / city / experience band / optional salary floor), ATS score 0–100 (word overlap + domain BONUS — never a filter), cross-source dedupe, persistent seen-store so each run reports only NEW jobs. Full JDs fetched for the top 8 Workday matches only. |
 | 4. TAILOR & DELIVER | `tailor.py`, `resume_render.py`, `report.py`, `notify.py` | Free-tier LLM (gemini default / groq / anthropic) returns strict JSON: tailored summary, lead bullets, **JD-vocabulary bullet rewrites**, truthful keywords, honest gap note — **never invents experience**. `tailor.build_tailored_resume()` applies: bullet reorder, validated rewording (every rewrite must keep all numbers/metrics identical and stay in a sane length band, else the original wording is kept), skill-group reorder, and skill-item reorder toward JD mentions. Only jobs scoring ≥ `filters.min_score_to_tailor` get tailored — weak fits stay visible in the CSV but don't get a resume. Renders per-job **DOCX + PDF** under `data/resumes/<date>/<company>_<title>/`, writes `data/job_queue_YYYY-MM-DD.csv`, and sends a Telegram digest. |
+
+## Follow-ups & weekly stats (`tracker.py`)
+
+- **Follow-up nudges (daily):** any job you've marked `applied = yes` that
+  still has no recorded outcome after `digest.followup_days` (default 7)
+  triggers a one-time Telegram nudge with the link, so applications don't
+  silently go stale. Record outcomes by setting the row's status to
+  `response` / `interview` / `rejected` / `offer` in the dashboard.
+- **Weekly stats (Sundays):** Telegram summary of jobs surfaced/tailored/
+  applied, outcome counts, and positive-response rate broken down by score
+  band and by source — evidence for tuning the score floor and deciding
+  where your application time actually converts. The same stats panel is
+  always visible in the dashboard.
 
 ## Web UI (Streamlit)
 

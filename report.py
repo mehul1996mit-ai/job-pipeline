@@ -8,7 +8,8 @@ import json
 from datetime import date
 from pathlib import Path
 
-COLUMNS = ["applied", "score", "title", "company", "location", "url",
+COLUMNS = ["applied", "applied_on", "score", "title", "company",
+           "location", "url",
            "source", "apply_channel", "salary_min", "salary_max",
            "updated_at", "resume_docx", "resume_pdf",
            "tailored_summary", "bullets_to_lead_with",
@@ -30,6 +31,7 @@ def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
             fit = t.get("fit_analysis") or {}
             w.writerow({
                 "applied": "no",
+                "applied_on": "",
                 "score": j.get("score", ""),
                 "title": j.get("title", ""),
                 "company": j.get("company", ""),
