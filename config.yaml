@@ -39,6 +39,10 @@ filters:
   # Annual INR. Enforced ONLY when the listing itself reports a salary.
   # Set to null to disable.
   min_salary_annual: null
+  # Jobs scoring below this (0-100 ATS fit score) are still listed in the
+  # CSV/digest for visibility, but are NOT tailored -- no point investing a
+  # tailored resume in a weak fit. Raise for stricter targeting.
+  min_score_to_tailor: 55
 
 # ------------------------------------------------------------------ scoring
 scoring:

@@ -7,6 +7,9 @@ experience. Gaps are surfaced honestly via honest_gap_note.
 Output contract (strict JSON):
   tailored_summary          3-4 sentences, facts from the base CV only
   bullets_to_lead_with      3 existing CV bullets, priority order
+  rewritten_bullets         JD-vocabulary rewordings of the most relevant
+                            bullets (same facts, same numbers — validated
+                            programmatically before use)
   keywords_to_add_if_true   keywords to weave in ONLY if genuinely true
   honest_gap_note           one sentence on what the CV does not support
 """
@@ -39,13 +42,25 @@ Return ONLY a JSON object (no markdown fences, no commentary) with exactly
 these keys:
 {{
   "tailored_summary": "3-4 sentences positioning the candidate for THIS job, using only CV facts",
-  "bullets_to_lead_with": ["existing CV bullet 1", "bullet 2", "bullet 3"],
+  "bullets_to_lead_with": ["existing CV bullet 1 copied EXACTLY", "bullet 2", "bullet 3"],
+  "rewritten_bullets": [
+    {{"original": "<one CV bullet copied EXACTLY, character for character>",
+      "rewritten": "<the same accomplishment reworded to mirror this JD's vocabulary. RULES: keep every number/metric/percentage unchanged; add no new numbers; add no tools, employers, domains, or claims not in the original; similar length>"}}
+  ],
   "keywords_to_add_if_true": ["only keywords genuinely supported by the CV"],
   "honest_gap_note": "one sentence: what this JD asks for that the CV does not demonstrate"
-}}"""
+}}
+
+For rewritten_bullets: rewrite the 4-6 bullets MOST relevant to this JD.
+Example of a good rewrite: if the JD says "client activation" and the CV
+bullet says "growing user engagement 27%", the rewrite may say "driving
+customer activation and engagement, growing engagement 27%" — same fact,
+JD's vocabulary. A rewrite that adds a skill, domain, or number the
+original lacks will be rejected."""
 
 EMPTY = {"tailored_summary": "", "bullets_to_lead_with": [],
-         "keywords_to_add_if_true": [], "honest_gap_note": ""}
+         "rewritten_bullets": [], "keywords_to_add_if_true": [],
+         "honest_gap_note": ""}
 
 
 def _extract_json(text: str) -> dict:
@@ -211,13 +226,34 @@ def _best_bullet_match(candidate: str, resume: dict, threshold: float = 0.35):
     return best
 
 
-def build_tailored_resume(master_resume: dict, tailored_fields: dict) -> dict:
+def _numbers_in(text: str) -> list[str]:
+    """All numeric tokens in a string (metrics, percentages, counts)."""
+    return sorted(re.findall(r"\d+(?:\.\d+)?", text or ""))
+
+
+def rewrite_is_safe(original: str, rewritten: str) -> bool:
+    """A rewrite may change WORDING only. Reject it if it:
+    - drops or adds any number/metric (facts must survive verbatim), or
+    - balloons/shrinks beyond a sane length band (a sign of added or
+      deleted claims rather than rewording)."""
+    if not original or not rewritten:
+        return False
+    if _numbers_in(original) != _numbers_in(rewritten):
+        return False
+    if not 0.5 <= len(rewritten) / len(original) <= 1.7:
+        return False
+    return True
+
+
+def build_tailored_resume(master_resume: dict, tailored_fields: dict,
+                          jd_text: str = "") -> dict:
     """Produce a tailored resume dict for file rendering.
 
-    HARD RULE: this only REORDERS content that already exists in
-    master_resume. It never writes LLM-generated prose into the structured
-    resume, except for `summary` (which the tailor prompt is itself
-    constrained to build only from CV facts). Name and contact are locked.
+    What may change vs the master: summary (rebuilt from CV facts),
+    bullet ORDER, bullet WORDING (validated rewrites only -- same facts,
+    same numbers), skill GROUP order, and skill ITEM order within a group.
+    What may never change: name, contact, employers, titles, dates,
+    education, achievements, metrics, and the set of claims made.
     """
     resume = copy.deepcopy(master_resume)
 
@@ -239,6 +275,21 @@ def build_tailored_resume(master_resume: dict, tailored_fields: dict) -> dict:
         bullets = resume["experience"][ci]["roles"][ri]["bullets"]
         bullets.insert(0, bullets.pop(bi))
 
+    # Apply JD-vocabulary rewrites -- only where the original is confidently
+    # located AND the rewrite survives the fact-integrity check. Anything
+    # that fails either test keeps the original wording.
+    for rw in tailored_fields.get("rewritten_bullets", []) or []:
+        original = (rw or {}).get("original", "")
+        rewritten = (rw or {}).get("rewritten", "")
+        if not rewrite_is_safe(original, rewritten):
+            continue
+        match = _best_bullet_match(original, resume, threshold=0.75)
+        if not match:
+            continue
+        ci, ri, bi = match
+        resume["experience"][ci]["roles"][ri]["bullets"][bi] = \
+            rewritten.strip()
+
     # Reorder skill groups so the ones matching JD keywords surface first.
     keywords = [k.lower() for k in
                (tailored_fields.get("keywords_to_add_if_true") or [])]
@@ -247,6 +298,18 @@ def build_tailored_resume(master_resume: dict, tailored_fields: dict) -> dict:
             items = group.get("items", "").lower()
             return sum(1 for k in keywords if k in items)
         resume["skills"] = sorted(resume["skills"], key=hits, reverse=True)
+
+    # Within each group, surface the skill ITEMS the JD actually mentions.
+    # Pure reorder of the existing comma-separated items -- nothing is
+    # added, renamed, or dropped.
+    jd_lower = (jd_text or "").lower()
+    if jd_lower:
+        for group in resume.get("skills", []):
+            items = [s.strip() for s in group.get("items", "").split(",")
+                     if s.strip()]
+            in_jd = [s for s in items if s.lower() in jd_lower]
+            rest = [s for s in items if s.lower() not in jd_lower]
+            group["items"] = ", ".join(in_jd + rest)
 
     resume["name"] = master_resume["name"]
     resume["contact_line"] = master_resume["contact_line"]

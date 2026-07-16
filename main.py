@@ -101,9 +101,16 @@ def main():
     # ------------------------------------------------ 4. TAILOR & DELIVER
     log("== 4/4 TAILOR & DELIVER")
     top_n = int(config.get("tailor", {}).get("top_n", 25))
-    to_tailor = new_jobs[:top_n]
-    log(f"   tailoring top {len(to_tailor)} via provider "
-        f"'{config.get('tailor', {}).get('provider')}'")
+    score_floor = int(
+        config.get("filters", {}).get("min_score_to_tailor", 0) or 0)
+    eligible = [j for j in new_jobs if j["score"] >= score_floor]
+    skipped_weak = len(new_jobs[:top_n]) - len(eligible[:top_n])
+    to_tailor = eligible[:top_n]
+    if skipped_weak > 0:
+        log(f"   score floor {score_floor}: skipping weak fits that would "
+            f"otherwise be tailored")
+    log(f"   tailoring top {len(to_tailor)} (score >= {score_floor}) via "
+        f"provider '{config.get('tailor', {}).get('provider')}'")
     resumes_dir = Path("data") / "resumes" / date.today().isoformat()
     for i, j in enumerate(to_tailor, 1):
         j["tailored"] = tailor_mod.tailor_job(
@@ -113,7 +120,7 @@ def main():
         # fabricated) so the semi-assisted apply flow has something real
         # to attach.
         tailored_resume = tailor_mod.build_tailored_resume(
-            master_resume, j["tailored"])
+            master_resume, j["tailored"], jd_text=j.get("description", ""))
         folder = resumes_dir / f"{_safe(j['company'])}_{_safe(j['title'])}"
         folder.mkdir(parents=True, exist_ok=True)
         docx_path = folder / "Mehul_Agarwal.docx"

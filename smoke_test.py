@@ -174,5 +174,57 @@ check("same-role 2nd priority in 2nd position",
       hl_role["bullets"][1].startswith("Design and ship the MCP"),
       f"(got: \"{hl_role['bullets'][1][:60]}...\")")
 
+print("\n== 6. JD-ALIGNED REWORDING (fact-integrity validation)")
+orig = ("Led development and management of digital platforms (app and web) "
+        "for the Personal Loan product, growing user engagement 27% and "
+        "user acquisition 14%.")
+good_rw = ("Led digital product management for Personal Loan platforms "
+           "(app and web), driving client activation and engagement growth "
+           "of 27% and user acquisition of 14%.")
+bad_rw_newnum = orig.replace("27%", "45%")
+bad_rw_addclaim = orig + (" Also owned Wholesale Banking activation "
+                          "strategy across payments and liquidity journeys "
+                          "for institutional clients worldwide, and more.")
+check("valid rewording accepted (same numbers, JD vocabulary)",
+      tailor.rewrite_is_safe(orig, good_rw))
+check("rewrite changing a metric REJECTED",
+      not tailor.rewrite_is_safe(orig, bad_rw_newnum))
+check("rewrite ballooning with added claims REJECTED",
+      not tailor.rewrite_is_safe(orig, bad_rw_addclaim))
+check("empty rewrite REJECTED", not tailor.rewrite_is_safe(orig, ""))
+
+rw_fields = {
+    "tailored_summary": "",
+    "bullets_to_lead_with": [],
+    "rewritten_bullets": [
+        {"original": orig, "rewritten": good_rw},
+        {"original": orig, "rewritten": bad_rw_newnum},  # must be ignored
+    ],
+    "keywords_to_add_if_true": [],
+}
+JD_FOR_SKILLS = ("We want experience with Google Analytics, A/B Testing "
+                 "and SEO plus stakeholder management.")
+rw_resume = tailor.build_tailored_resume(master, rw_fields,
+                                         jd_text=JD_FOR_SKILLS)
+pl_bullets = rw_resume["experience"][0]["roles"][1]["bullets"]
+check("valid rewrite applied in place",
+      any(b == good_rw for b in pl_bullets))
+check("original wording replaced (not duplicated)",
+      not any(b == orig for b in pl_bullets)
+      and sum(1 for b in pl_bullets if b == good_rw) == 1)
+analytics_group = next(g for g in rw_resume["skills"]
+                       if g["label"] == "Analytics & Tools")
+first_items = [s.strip() for s in
+               analytics_group["items"].split(",")][:3]
+check("skill ITEMS reordered toward JD mentions",
+      "Google Analytics" in first_items and "A/B Testing" in first_items,
+      f"(first items: {first_items})")
+all_items_before = sorted(
+    s.strip() for g in master["skills"] for s in g["items"].split(","))
+all_items_after = sorted(
+    s.strip() for g in rw_resume["skills"] for s in g["items"].split(","))
+check("no skill items added/removed/renamed by reorder",
+      all_items_before == all_items_after)
+
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)
