@@ -4,7 +4,7 @@ Read this file first in any new session on this project. It has the
 current status; `README.md` has full architecture/setup detail and
 `GCC_COVERAGE_GUIDE.md` has the manual-application layer.
 
-## STATUS (last updated 2026-07-17)
+## STATUS (last updated 2026-07-27)
 
 **What this is:** A daily, automated job-search pipeline for Mehul —
 Product Manager, 4+ yrs digital lending/fintech (Bajaj Finance, Pune).
@@ -21,6 +21,17 @@ runs the full pipeline daily at 08:30 IST (03:00 UTC), commits
 `data/seen_jobs.json` + `data/job_queue_*.csv` back with `[skip ci]`.
 Sunday runs additionally send a weekly stats digest.
 
+**⚠️ Bug fixed 2026-07-27 — verify it stuck:** the commit-back step had
+been silently no-oping every day since 2026-07-16 (`git add
+data/seen_jobs.json data/followups.json data/job_queue_*.csv || true`
+failed whole-command whenever `followups.json` didn't exist yet, so
+nothing staged, but `|| true` masked it and the run still reported
+"success"). Fixed in commit `b50ed34` by splitting the `followups.json`
+add into a conditional. **Check the next scheduled run's "Commit
+seen-store back to the repo" step** — it should say "Update seen-store &
+queue ..." instead of "Nothing to commit." If it's still not committing,
+look there first.
+
 **Dashboard:**
 - Local: `streamlit_app.py`, normally run at `http://localhost:8502`.
   It's a background process started via `Start-Process` and it dies
@@ -32,14 +43,13 @@ Sunday runs additionally send a weekly stats digest.
   Start-Process -FilePath "C:\Users\User\AppData\Local\Programs\Python\Python312\python.exe" -ArgumentList "-m","streamlit","run","streamlit_app.py","--server.headless","true","--server.port","8502" -WindowStyle Hidden -RedirectStandardOutput "streamlit_out.log" -RedirectStandardError "streamlit_err.log"
   ```
   Then verify with `Get-NetTCPConnection -LocalPort 8502 -State Listen`.
-- **Hosted (Streamlit Community Cloud): deployment in progress as of
-  2026-07-17.** Mehul signed in at share.streamlit.io, created a new app,
-  and pointed it at this repo. Last known step: filling in Advanced
-  Settings → Secrets before clicking Deploy. **Check with Mehul whether
-  this completed** — if so, get the app URL from him and use it as the
-  primary dashboard link instead of localhost. If the deploy failed, the
-  most likely cause is missing/malformed secrets (see TOML block in
-  README.md → Web UI section).
+- **Hosted (Streamlit Community Cloud): confirmed live as of 2026-07-27**
+  at **https://job-1357.streamlit.app/** — use this as the primary
+  dashboard link instead of localhost. Verified via the apps list at
+  share.streamlit.io (app `job-pipeline · main · streamlit_app.py`,
+  public/no error badge); direct in-page verification was blocked by a
+  browser-extension domain permission, so if data looks stale there,
+  open it manually to double check.
 
 **Secrets (5 required):** `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`,
 `GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Live in three
@@ -47,17 +57,18 @@ places only — GitHub Actions repo secrets, Streamlit Cloud app secrets,
 and Mehul's local Windows user env vars (`setx`). **Never in source files
 or committed anywhere.** Code always reads via `os.environ.get("NAME")`.
 
-**⚠️ Key rotation reminder:** these 5 keys were pasted directly into chat
-on 2026-07-16 for initial testing. Mehul said he'd rotate them after
-testing — **confirm this happened**; if not, remind him (Adzuna console,
-Gemini/AI Studio, Telegram BotFather `/revoke`) and that the secrets in
-all three locations above need updating afterward. Separately, on
-2026-07-17 three files (`sources/adzuna.py`, `notify.py`, `README.md`)
-were found with the literal key values hardcoded in place of env-var
-names — this was caught and reverted before anything was committed/pushed,
-so no leak reached git history, but if you ever see literal key values in
-a source file again, revert immediately and flag it — don't just fix
-silently.
+**Key rotation — decided against, 2026-07-27:** these 5 keys were pasted
+directly into chat on 2026-07-16 for initial testing. Mehul reviewed the
+tradeoff (low-privilege free-tier keys — job-search API quota + bot
+token, not financial/PII access) and chose to keep using the original
+keys rather than rotate. **Do not re-raise this as an open item** unless
+something changes (e.g. suspected misuse, quota abuse, or Mehul asks).
+Separately, on 2026-07-17 three files (`sources/adzuna.py`, `notify.py`,
+`README.md`) were found with the literal key values hardcoded in place of
+env-var names — this was caught and reverted before anything was
+committed/pushed, so no leak reached git history, but if you ever see
+literal key values in a source file again, revert immediately and flag
+it — don't just fix silently.
 
 **Retired systems — do not suggest these:**
 - `job-agent` repo: GitHub Actions workflow disabled, repo archived
