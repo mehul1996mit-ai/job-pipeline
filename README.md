@@ -1,5 +1,9 @@
 # job_pipeline — free, cloud-hosted daily job application pipeline
 
+> **Starting a new session on this project?** Read [`CLAUDE.md`](CLAUDE.md)
+> first — it has current deployment status, key-rotation state, and
+> operational notes that this file doesn't cover.
+
 A 4-stage pipeline that runs **daily and unattended** on GitHub Actions
 (free tier), finds relevant roles, scores them against the FULL text of your
 CV, tailors application material with a free-tier LLM, and delivers a
@@ -125,6 +129,9 @@ Everything lives in `config.yaml`:
 - `filters.title_keywords` — allowlist; a listing needs one in its title.
 - `filters.cities` — allowlist (empty = all cities); "remote" always passes.
 - `filters.min_salary_annual` — enforced ONLY when a listing reports salary.
+- `filters.min_score_to_tailor` — jobs below this score (default 55) stay
+  in the CSV/digest but don't get a tailored resume.
+- `filters.remote_only` — `true` drops all on-site/hybrid listings.
 - `profile.experience_years` — drives the experience-band overlap check.
 - `scoring.domain_keywords` — bonus points only, never a filter.
 - `workday.tenants` — add more open CXS instances if you find them.

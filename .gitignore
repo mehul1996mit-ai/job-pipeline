@@ -6,3 +6,5 @@ __pycache__/
 data/resumes/
 data/_livetest/
 data/_demo/
+streamlit_out.log
+streamlit_err.log
