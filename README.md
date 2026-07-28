@@ -81,6 +81,65 @@ fields, no additional cost), which is merged over the deterministic one. A
 failed or empty model response never blanks out a real regex finding, and every
 result records which analyst produced it.
 
+## Rating matches, and the learning loop (`feedback.py`)
+
+Every queued job carries a `match_feedback` column you set in the dashboard —
+**good / partial / no**. It's separate from `applied`: one is "was this
+relevant", the other is "did I submit".
+
+Once there are **25+ ratings with at least 5 in each class**, the Learning tab
+proposes changes:
+
+- **Title keywords to drop** — any keyword whose jobs you reject 70%+ of the
+  time (minimum 6 samples) is pulling the search in the wrong direction.
+- **Re-weighted sub-scores** — each sub-score is correlated (point-biserial)
+  against your "good" labels, and weights nudge toward whatever actually
+  predicted a match.
+
+Three deliberate constraints:
+
+1. **Nothing is applied automatically.** You get a proposal and an accept
+   button. A scorer that quietly re-tunes itself makes your own score history
+   stop meaning anything — last month's 72 has to still mean what it meant.
+2. **Nothing is concluded below the floors.** Under 25 labels it reports the
+   shortfall instead of inventing a trend from six data points.
+3. **It validates the scorer before tuning it.** If jobs you called "good"
+   don't actually score higher than the ones you called "no", it says so and
+   flags the weight proposal as low-confidence — re-weighting a score that
+   doesn't separate is rearranging deck chairs.
+
+Ratings live in the daily CSV, so they're stored day-wise and committed with
+the queue like everything else.
+
+## Job sources — and the portals this deliberately does not scrape
+
+Automated, no auth, no scraping: **Adzuna** (aggregator) plus direct ATS feeds
+from **Workday, Greenhouse, Lever, SmartRecruiters and Ashby**. These are the
+feeds employers publish for exactly this purpose, and they're where most India
+GCC and startup product roles appear first.
+
+**Naukri, LinkedIn, Indeed, Shine, foundit, TimesJobs, iimjobs and Glassdoor
+are never scraped.** They have no public API, their terms prohibit automated
+access, and a scraper would run against *your own* accounts — a Naukri ban
+costs you the recruiter inbound that platform generates, which is worth more
+than the listings. Their bot protection also breaks scrapers constantly, which
+is a poor foundation for something meant to run unattended.
+
+Instead, `sources/job_alert_email.py` ingests the **job-alert emails those
+portals already send you**. Your inbox is your data: no bot detection, no
+account risk, no third-party terms involved — the portal mailed it to you on
+purpose. It connects to IMAP **read-only** (`BODY.PEEK`, so nothing is even
+marked as read), extracts posting links, and normalizes them into the same
+schema as every other source. It never sends, replies, or deletes.
+
+Setup: create alerts on each portal → filter them into a Gmail label →
+generate a Gmail **app password** (Account → Security → 2-Step Verification →
+App passwords; never your account password) → set `JOB_ALERT_EMAIL` and
+`JOB_ALERT_APP_PASSWORD` as secrets → set `job_alert_email.enabled: true` in
+`config.yaml`. Alert emails carry a link but no job description, so these
+listings score on title alone and rank below fully-described ones — expected,
+not a defect.
+
 ## Follow-ups & weekly stats (`tracker.py`)
 
 - **Follow-up nudges (daily):** any job you've marked `applied = yes` that

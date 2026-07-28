@@ -136,6 +136,43 @@ deterministic read via `merge_llm_analysis()`. An empty or failed LLM analysis
 never blanks out a real regex finding, and `analyst` records which produced the
 result so a deterministic read is never presented as a model's.
 
+**Portal coverage — asked for, and how it was answered (2026-07-28).** Mehul
+asked for "all top-25 Indian job portals including Naukri, LinkedIn, Indeed".
+Those are **still not scraped**, and shouldn't be: it breaches their terms and
+risks bans on the very accounts he job-hunts with (Naukri recruiter inbound is
+worth more than the listings), and their bot protection makes scrapers a
+permanent maintenance tax on an unattended pipeline. Instead:
+- `sources/job_alert_email.py` — the real answer. Those portals all EMAIL job
+  alerts; his own inbox is his own data. Read-only IMAP (`BODY.PEEK`, never
+  marks read, never sends/deletes), parses posting links out of the alert
+  mails. Off by default; needs `JOB_ALERT_EMAIL` + `JOB_ALERT_APP_PASSWORD`
+  (a Gmail **app password**, never the account password) and
+  `job_alert_email.enabled: true`. Emails carry a link but no JD, so these
+  score on title alone and rank accordingly — that's expected, not a bug.
+- `sources/smartrecruiters.py`, `sources/ashby.py` — public no-auth ATS feeds,
+  joining Workday/Greenhouse/Lever. Token/board lists ship EMPTY; add only
+  confirmed ones.
+- Declined and not built: any direct Naukri/LinkedIn/Indeed scraper. Offered
+  but not taken up: SerpApi Google Jobs (paid, legitimately indexes those
+  portals). If Mehul asks again, this is the tradeoff to re-present — don't
+  just build the scraper.
+
+**Learning loop (`feedback.py`).** The queue CSV has a `match_feedback` column
+(good/partial/no) you set in the dashboard's Learning tab. Once there are
+**25+ labels with 5+ in each class**, it proposes: title keywords to drop
+(70%+ rejection rate, min 6 samples) and re-weighted sub-scores (point-biserial
+correlation of each sub-score against your 'good' labels). **It never
+auto-applies** — the dashboard shows a proposal with an explicit accept button
+that rewrites `config.yaml`. Two invariants hold simultaneously in
+`propose_weights`: no weight moves more than ±25% relative per batch, and the
+set still sums to its original total (clamp and renormalize are alternated
+until both settle — doing either once breaks the other). `partial` is excluded
+from the correlation rather than mapped to 0.5; forcing the ambiguous middle
+onto a binary axis is how a weak signal becomes a confident wrong answer. The
+loop also self-checks first: `score_separation()` reports whether the score
+actually separates your good matches from your bad ones, because re-weighting
+a scorer that doesn't separate is rearranging deck chairs.
+
 **Known quirks:**
 - Generated `.docx` files lock if left open in Word — regenerating into
   the same path then throws `PermissionError`. Write to a fresh path
@@ -159,7 +196,9 @@ result so a deterministic read is never presented as a model's.
 | `aggregate.py` | 6 sub-scores → structured score, penalties, eligibility gates |
 | `calibrate.py` | Percentile vs JD difficulty, counterfactual gaps, explainability |
 | `jd_analyst.py` | JD requirement extraction (deterministic + LLM merge) |
-| `sources/{adzuna,workday,greenhouse,lever}.py` | Job sources, normalized schema |
+| `sources/{adzuna,workday,greenhouse,lever,smartrecruiters,ashby}.py` | Job sources, normalized schema |
+| `sources/job_alert_email.py` | Read-only IMAP ingest of Naukri/LinkedIn/Indeed alert emails |
+| `feedback.py` | good/partial/no labels → proposed search + weight changes |
 | `matcher.py` | Filters + ATS scoring + missing-keyword extraction |
 | `dedupe.py` | Cross-source dedupe (direct ATS beats aggregator) + seen-store |
 | `tailor.py` | LLM tailoring, fact-integrity validation, resume-reorder logic, change_log() |

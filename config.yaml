@@ -132,6 +132,36 @@ lever:
   # Add ONLY confirmed company tokens, e.g. - postman
   tokens: []
 
+smartrecruiters:
+  # Public postings API. Add confirmed company identifiers (the slug in
+  # jobs.smartrecruiters.com/<identifier>).
+  companies: []
+  limit: 100
+  detail_top_n: 5              # full JD for the first N per company only
+
+ashby:
+  # Public job-board API. Board name = the slug in jobs.ashbyhq.com/<board>.
+  boards: []
+
+# Job-alert email ingestion — the LEGITIMATE route to Naukri / LinkedIn /
+# Indeed / Shine / foundit and any other portal with no public API.
+#
+# Those sites are never scraped: it violates their terms and risks the very
+# accounts Mehul job-hunts with (see the design boundary in README.md). But
+# they all email job alerts, and his own inbox is his own data. This reads that
+# mailbox READ-ONLY -- never sends, replies, deletes, or marks anything read.
+#
+# Setup: create alerts on each portal -> filter them into a Gmail label ->
+# generate a Gmail APP PASSWORD (not the account password) -> set
+# JOB_ALERT_EMAIL and JOB_ALERT_APP_PASSWORD as secrets -> flip enabled: true.
+# Credentials come from the environment only, never from this file.
+job_alert_email:
+  enabled: false
+  imap_host: imap.gmail.com
+  folder: job-alerts           # Gmail label, or INBOX
+  lookback_days: 2             # daily run needs only the last day or two
+  max_messages: 60
+
 # ---------------------------------------------------------------- tailoring
 tailor:
   provider: gemini             # gemini | groq | anthropic

@@ -8,13 +8,13 @@ import json
 from datetime import date
 from pathlib import Path
 
-COLUMNS = ["applied", "applied_on", "score", "title", "company",
-           "location", "url",
+COLUMNS = ["applied", "applied_on", "match_feedback", "score", "title",
+           "company", "location", "url",
            # Scoring detail (ported scoring stack, 2026-07-28). `score` is the
            # structured score; these explain it rather than restate it.
            "frozen_score", "legacy_score", "percentile", "band",
            "jd_difficulty", "must_coverage", "missing_must", "top_gaps",
-           "score_flags",
+           "score_flags", "sub_scores",
            "source", "apply_channel", "salary_min", "salary_max",
            "updated_at", "resume_docx", "resume_pdf",
            "tailored_summary", "bullets_to_lead_with",
@@ -37,6 +37,9 @@ def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
             w.writerow({
                 "applied": "no",
                 "applied_on": "",
+                # Your good/partial/no relevance label. Blank until you set it
+                # in the dashboard; feedback.py learns from these.
+                "match_feedback": "",
                 "score": j.get("score", ""),
                 "title": j.get("title", ""),
                 "company": j.get("company", ""),
@@ -56,6 +59,11 @@ def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
                     [{"need": g["requirement"], "gain": g["delta"]}
                      for g in (j.get("top_gaps") or [])], ensure_ascii=False),
                 "score_flags": "; ".join(j.get("score_flags", []) or []),
+                # Per-job sub-scores: what feedback.py correlates your labels
+                # against to work out which signals actually predict a match.
+                "sub_scores": json.dumps(
+                    {k: round(v, 4) for k, v in
+                     (j.get("sub_scores") or {}).items()}, ensure_ascii=False),
                 "source": j.get("source", ""),
                 "apply_channel": j.get("apply_channel", ""),
                 "salary_min": j.get("salary_min") or "",

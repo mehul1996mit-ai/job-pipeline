@@ -47,8 +47,8 @@ def secret_or_env(name):
     return os.environ.get(name, "")
 
 
-tab_queue, tab_run, tab_filters = st.tabs(
-    ["📋 Review queue", "🚀 Run now", "⚙️ Filters"])
+tab_queue, tab_learn, tab_run, tab_filters = st.tabs(
+    ["📋 Review queue", "🧠 Learning", "🚀 Run now", "⚙️ Filters"])
 
 # ------------------------------------------------------------ Review queue
 with tab_queue:
@@ -57,37 +57,74 @@ with tab_queue:
         st.info("No queue CSVs yet. Trigger a run from the 'Run now' tab, "
                 "or wait for the daily 08:30 IST scan.")
     else:
-        chosen = st.selectbox(
-            "Queue date", queues,
-            format_func=lambda p: Path(p).stem.replace("job_queue_", ""))
+        # Date picker rather than a flat filename list: this grows by one
+        # entry a day, so a dropdown stops being usable within a couple of
+        # months. Only days that actually have a queue are selectable.
+        from datetime import date as _d
+        by_day = {Path(p).stem.replace("job_queue_", ""): p for p in queues}
+        available = sorted(by_day, reverse=True)
+        dc1, dc2 = st.columns([1, 2])
+        picked = dc1.date_input(
+            "Queue date", value=_d.fromisoformat(available[0]),
+            min_value=_d.fromisoformat(available[-1]),
+            max_value=_d.fromisoformat(available[0]),
+            help="Every daily queue is kept indefinitely — pick any past day.")
+        key = picked.isoformat()
+        if key not in by_day:
+            dc2.warning(
+                f"No scan stored for {key}. Nearest available: "
+                f"{min(available, key=lambda d: abs((_d.fromisoformat(d) - picked).days))}."
+                "  \nDays are missing between 2026-07-18 and 2026-07-26 — the "
+                "commit step was silently failing then (fixed 2026-07-27).")
+            key = min(available,
+                      key=lambda d: abs((_d.fromisoformat(d) - picked).days))
+        dc2.caption(f"Showing **{key}** — {len(available)} day(s) stored, "
+                    f"{available[-1]} to {available[0]}.")
+        chosen = by_day[key]
+
         df = pd.read_csv(chosen, encoding="utf-8-sig",
                          keep_default_na=False)
+        if "match_feedback" not in df.columns:
+            df["match_feedback"] = ""
+        df = df.sort_values("score", ascending=False).reset_index(drop=True)
         tailored_df = df[df["tailored_summary"] != ""]
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("New jobs", len(df))
         c2.metric("Tailored (score ≥ floor)", len(tailored_df))
         c3.metric("Marked applied", int((df["applied"] == "yes").sum()))
+        c4.metric("Rated", int((df["match_feedback"] != "").sum()))
 
         st.subheader("Full queue")
-        st.caption("Status flow: no → yes (applied) → response / interview "
-                   "/ rejected / offer. Plain 'yes' rows with no outcome "
-                   "get a Telegram follow-up nudge after 7 days.")
+        show_n = st.radio("Show", [50, 100, "All"], index=0, horizontal=True,
+                          help="Ranked by fit score, highest first.")
+        st.caption("**match** is your relevance rating — good / partial / no. "
+                   "It trains the search (see the Learning tab); it is not the "
+                   "same as **applied**, which tracks what you actually "
+                   "submitted. Status flow: no → yes → response / interview / "
+                   "rejected / offer.")
         if "applied_on" not in df.columns:
             df["applied_on"] = ""
         # Scoring columns added 2026-07-28. Queues written before that don't
         # have them, so only show the ones this file actually carries.
         score_cols = [c for c in ("percentile", "band", "must_coverage")
                       if c in df.columns]
-        view_cols = (["applied", "score"] + score_cols
+        view_cols = (["applied", "match_feedback", "score"] + score_cols
                      + ["title", "company", "location", "source", "url"])
+        view_df = df if show_n == "All" else df.head(int(show_n))
         edited = st.data_editor(
-            df[view_cols],
+            view_df[view_cols],
             column_config={
                 "applied": st.column_config.SelectboxColumn(
                     "applied",
                     options=["no", "yes", "skip", "response", "interview",
                              "rejected", "offer"],
                     width="small"),
+                "match_feedback": st.column_config.SelectboxColumn(
+                    "match", options=["", "good", "partial", "no"],
+                    width="small",
+                    help="Was this a relevant job for you? Your ratings train "
+                         "the search — the Learning tab proposes changes once "
+                         "there are enough of them."),
                 "url": st.column_config.LinkColumn("link"),
                 "score": st.column_config.NumberColumn(
                     "fit", width="small",
@@ -104,17 +141,23 @@ with tab_queue:
                     help="How many of the posting's must-have requirements "
                          "your CV evidences."),
             },
-            disabled=[c for c in view_cols if c != "applied"],
-            hide_index=True, use_container_width=True, height=380)
-        if st.button("💾 Save applied-status changes"):
+            disabled=[c for c in view_cols
+                      if c not in ("applied", "match_feedback")],
+            hide_index=True, use_container_width=True, height=520)
+        if st.button("💾 Save ratings & applied-status changes"):
             from datetime import date as _date
-            newly_applied = (df["applied"].isin(["no", "skip"])
-                             & ~edited["applied"].isin(["no", "skip"]))
-            df.loc[newly_applied, "applied_on"] = _date.today().isoformat()
-            df["applied"] = edited["applied"]
+            # `edited` covers only the visible slice; write back by index so
+            # a 50-row view never blanks the rows below it.
+            idx = edited.index
+            newly = (df.loc[idx, "applied"].isin(["no", "skip"])
+                     & ~edited["applied"].isin(["no", "skip"]))
+            df.loc[idx[newly], "applied_on"] = _date.today().isoformat()
+            df.loc[idx, "applied"] = edited["applied"]
+            df.loc[idx, "match_feedback"] = edited["match_feedback"]
             df.to_csv(chosen, index=False, encoding="utf-8-sig")
-            st.success("Saved. Commit/push the CSV if you want the cloud "
-                       "follow-up nudges to see these statuses.")
+            st.success(f"Saved {int((edited['match_feedback'] != '').sum())} "
+                       f"rating(s). Commit/push the CSV so the cloud run sees "
+                       f"them.")
 
         st.subheader("📈 Stats so far")
         import tracker as tracker_mod
@@ -268,6 +311,89 @@ with tab_queue:
                     st.success("Tailored and saved to the queue — "
                                "reloading...")
                     st.rerun()
+
+# ----------------------------------------------------------------- Learning
+with tab_learn:
+    import feedback as feedback_mod
+
+    learn_cfg = load_config()
+
+    st.markdown(
+        "Rate jobs **good / partial / no** in the review queue. Once there "
+        "are enough ratings, this proposes changes to your search and "
+        "scoring — which you accept or ignore. **Nothing is applied "
+        "automatically**: a scorer that quietly re-tunes itself makes your "
+        "own score history stop meaning anything.")
+
+    prop = feedback_mod.build_proposal(learn_cfg, str(DATA))
+    rd = prop["readiness"]
+    cts = rd["counts"]
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Rated", rd["total"])
+    m2.metric("good", cts["good"])
+    m3.metric("partial", cts["partial"])
+    m4.metric("no", cts["no"])
+    st.progress(min(1.0, rd["total"] / feedback_mod.MIN_LABELS))
+    (st.success if rd["ready"] else st.info)(rd["note"])
+
+    sep = prop["separation"]
+    if sep.get("separates") is not None:
+        st.subheader("Is the score actually working?")
+        st.caption("Checked before anything is tuned on top of it — if the "
+                   "score can't tell your good matches from your bad ones, "
+                   "re-weighting its parts won't help.")
+        (st.success if sep["separates"] else st.warning)(sep["note"])
+
+    if prop["keywords"]:
+        st.subheader("Title keywords by hit rate")
+        st.caption("Worst first. A keyword you almost always reject is "
+                   "pulling the search in the wrong direction.")
+        st.dataframe(pd.DataFrame(prop["keywords"]), hide_index=True,
+                     use_container_width=True)
+    if prop["sources"]:
+        st.subheader("Sources by hit rate")
+        st.dataframe(pd.DataFrame(prop["sources"]), hide_index=True,
+                     use_container_width=True)
+
+    if rd["ready"]:
+        st.subheader("Proposed changes")
+        drops = prop["suggested_drops"]
+        w = prop["weights"] or {}
+        if drops:
+            st.write("**Title keywords to drop** — you rated 70%+ of their "
+                     "jobs 'no':")
+            st.code("\n".join(f"- {d}" for d in drops))
+        if w.get("proposed"):
+            comp = pd.DataFrame({
+                "sub-score": list(w["proposed"]),
+                "current": [((learn_cfg.get("scoring") or {}).get("weights") or {}
+                             ).get(k) for k in w["proposed"]],
+                "proposed": list(w["proposed"].values()),
+                "correlation with 'good'": [w["correlations"].get(k)
+                                            for k in w["proposed"]],
+            })
+            st.dataframe(comp, hide_index=True, use_container_width=True)
+            st.caption(w["note"])
+        if drops or w.get("proposed"):
+            st.warning("Review these before accepting. Applying them "
+                       "rewrites config.yaml and changes how every future "
+                       "job scores — past scores stay as they were.")
+            if st.button("✅ Accept and write to config.yaml"):
+                if drops:
+                    learn_cfg["filters"]["title_keywords"] = [
+                        k for k in learn_cfg["filters"]["title_keywords"]
+                        if k not in drops]
+                if w.get("proposed"):
+                    learn_cfg.setdefault("scoring", {})["weights"] = w["proposed"]
+                (ROOT / "config.yaml").write_text(
+                    yaml.safe_dump(learn_cfg, sort_keys=False, allow_unicode=True),
+                    encoding="utf-8")
+                st.success("config.yaml updated. Commit/push it so the daily "
+                           "cloud run picks it up.")
+        else:
+            st.info("Nothing worth changing — your current config is "
+                    "consistent with how you've been rating jobs.")
 
 # ------------------------------------------------------------------ Run now
 with tab_run:

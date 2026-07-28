@@ -26,7 +26,8 @@ import tailor as tailor_mod
 import tracker
 from cv_parser import parse_cv, keyword_set
 from cv_structure import parse_cv_structured
-from sources import adzuna, greenhouse, lever, workday
+from sources import (adzuna, ashby, greenhouse, job_alert_email, lever,
+                     smartrecruiters, workday)
 
 
 def _safe(s: str) -> str:
@@ -64,7 +65,8 @@ def main():
     # --------------------------------------------------------- 2. SEARCH
     log("== 2/4 SEARCH: pulling live listings")
     jobs = []
-    for module in (adzuna, workday, greenhouse, lever):
+    for module in (adzuna, workday, greenhouse, lever, smartrecruiters, ashby,
+                   job_alert_email):
         try:
             jobs.extend(module.fetch(config, log=log))
         except Exception as e:  # a whole-source failure must not kill the run
@@ -100,6 +102,7 @@ def main():
             "missing_must": r["missing_must"],
             "top_gaps": r["top_gaps"],
             "score_flags": r["flags"],
+            "sub_scores": r["sub_scores"],
             "jd_analysis": r["analysis"],
         })
 
@@ -160,7 +163,7 @@ def main():
                 "band": r["band"], "jd_difficulty": r["jd_difficulty"],
                 "must_coverage": r["must_coverage"],
                 "missing_must": r["missing_must"], "top_gaps": r["top_gaps"],
-                "score_flags": r["flags"],
+                "score_flags": r["flags"], "sub_scores": r["sub_scores"],
             })
             if r["score"] != before:
                 log(f"   rescored on model JD read: {before} -> {r['score']} "

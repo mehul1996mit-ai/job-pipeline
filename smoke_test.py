@@ -455,5 +455,97 @@ check("score_job returns structured + frozen + percentile",
 check("scoring runs with no API key set (fully deterministic)",
       r["analyst"] == "deterministic")
 
+print("\n== 10. MATCH FEEDBACK / LEARNING LOOP (offline)")
+import feedback as fb
+from sources import ashby, job_alert_email, smartrecruiters
+
+def _row(label, score, subs, title="Product Manager", source="adzuna"):
+    return {"match_feedback": label, "score": str(score), "title": title,
+            "source": source, "sub_scores": json.dumps(subs)}
+
+thin = [_row("good", 80, {"skill_match": 0.8}) for _ in range(3)]
+r_thin = fb.readiness(thin)
+check("below the label floor, nothing is concluded", not r_thin["ready"])
+check("shortfall is reported honestly, not hidden",
+      f"{len(thin)}/{fb.MIN_LABELS}" in r_thin["note"], f"({r_thin['note'][:60]})")
+check("build_proposal returns no weights below the floor",
+      fb.build_proposal({}, "data")["weights"] is None
+      or fb.readiness(fb.load_labelled("data"))["ready"])
+
+# A set where skill_match genuinely tracks the label and trajectory doesn't.
+many = ([_row("good", 78, {"skill_match": 0.85, "trajectory": 0.5,
+                           "domain": 0.9}) for _ in range(9)]
+        + [_row("partial", 60, {"skill_match": 0.55, "trajectory": 0.9,
+                                "domain": 0.5}) for _ in range(8)]
+        + [_row("no", 44, {"skill_match": 0.2, "trajectory": 0.7,
+                           "domain": 0.1}, title="Brand Manager") for _ in range(8)])
+r_many = fb.readiness(many)
+check("enough labels across all three classes unlocks proposals",
+      r_many["ready"], f"({r_many['total']} labels)")
+
+sep = fb.score_separation(many)
+check("separation check reports the good-vs-no score gap",
+      sep["separates"] and sep["delta"] > 5, f"(delta {sep['delta']})")
+
+w = fb.propose_weights(many, {"skill_match": 0.40, "trajectory": 0.05,
+                              "domain": 0.15})
+check("weight proposal correlates each sub-score with 'good'",
+      w["correlations"]["skill_match"] > w["correlations"]["trajectory"],
+      f"(skill {w['correlations']['skill_match']} vs "
+      f"trajectory {w['correlations']['trajectory']})")
+check("a predictive sub-score is weighted UP",
+      w["proposed"]["skill_match"] > 0.40)
+check("weights still sum to what they summed to before",
+      abs(sum(w["proposed"].values()) - 0.60) < 1e-6,
+      f"({sum(w['proposed'].values()):.4f})")
+check("a single batch cannot move a weight more than the cap",
+      all(abs(w["proposed"][k] - c) <= c * fb.MAX_WEIGHT_NUDGE + 1e-9
+          for k, c in {"skill_match": 0.40, "trajectory": 0.05,
+                       "domain": 0.15}.items()))
+check("'partial' is excluded from correlation, not forced onto the axis",
+      fb._positive("partial") == 0 and fb._positive("good") == 1)
+
+kw = fb.keyword_performance(many, ["product manager", "brand manager"])
+bad = [k for k in kw if k["keyword"] == "brand manager"]
+check("a keyword you always reject surfaces with a 1.0 no-rate",
+      bad and bad[0]["no_rate"] == 1.0, str(bad[:1]))
+check("a keyword below the sample floor is not judged",
+      not fb.keyword_performance(many[:3], ["product manager"]))
+check("point_biserial refuses a constant feature",
+      fb.point_biserial([5, 5, 5, 5], [1, 0, 1, 0]) is None)
+check("point_biserial refuses a single-class outcome",
+      fb.point_biserial([1, 2, 3, 4], [1, 1, 1, 1]) is None)
+
+# --- new sources are keyless / opt-in and fail closed --------------------
+check("smartrecruiters skips cleanly with no companies configured",
+      smartrecruiters.fetch({}, log=lambda *a: None) == [])
+check("ashby skips cleanly with no boards configured",
+      ashby.fetch({}, log=lambda *a: None) == [])
+check("email alerts are OFF unless explicitly enabled",
+      job_alert_email.fetch({}, log=lambda *a: None) == [])
+check("email alerts skip without credentials, never guess them",
+      job_alert_email.fetch({"job_alert_email": {"enabled": True}},
+                            log=lambda *a: None) == [])
+check("portal detected from a Naukri alert link",
+      job_alert_email._portal_of(
+          "https://www.naukri.com/job-listings-product-manager-abc-123")
+      == "naukri")
+check("portal detected from a LinkedIn alert link",
+      job_alert_email._portal_of(
+          "https://www.linkedin.com/jobs/view/4012345678/") == "linkedin")
+check("unsubscribe/social links are never treated as jobs",
+      all(job_alert_email.NOISE_URL_RE.search(u) for u in
+          ["https://naukri.com/unsubscribe?x=1",
+           "https://www.facebook.com/naukri"]))
+_alert_html = ('<a href="https://www.linkedin.com/jobs/view/4012345678/">'
+               'Senior Product Manager - Payments</a>')
+check("job title read from the alert email's own link text",
+      job_alert_email._anchor_titles(_alert_html).get(
+          "https://www.linkedin.com/jobs/view/4012345678/")
+      == "Senior Product Manager - Payments")
+check("a 'View job' button falls back to the URL slug, not a fake title",
+      job_alert_email._anchor_titles(
+          '<a href="https://www.naukri.com/job-listings-x-1">View Job</a>') == {})
+
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)
