@@ -125,22 +125,39 @@ workday:
       searches: ["product manager", "business analyst"]
 
 greenhouse:
-  # Add ONLY confirmed board tokens, e.g. - razorpaysoftwareprivatelimited
-  tokens: []
+  # Verified 2026-07-28 by hitting the real API and confirming actual
+  # India-located PM/BA/Partnerships postings (not just a valid token) —
+  # see CLAUDE.md for the method. Add more only the same way: a token that
+  # 200s with zero India PM/BA hits isn't worth a daily poll.
+  tokens:
+    - razorpaysoftwareprivatelimited   # Razorpay — Bengaluru PM + partnerships
+    - stripe                           # Stripe — Bengaluru PM (India GCC)
+    - coinbase                         # Coinbase — Remote-India PM
+    - databricks                       # Databricks — Bengaluru/Mumbai alliance mgr
+    - mongodb                          # MongoDB — Gurugram PM
+    - okta                             # Okta — Bengaluru PM/alliances (India GCC)
+    - phonepe                          # PhonePe — Bangalore PM
 
 lever:
-  # Add ONLY confirmed company tokens, e.g. - postman
-  tokens: []
+  # Verified the same way, 2026-07-28.
+  tokens:
+    - cred                             # CRED — Bengaluru partnerships
+    - meesho                           # Meesho — Bangalore Group PM
 
 smartrecruiters:
-  # Public postings API. Add confirmed company identifiers (the slug in
-  # jobs.smartrecruiters.com/<identifier>).
-  companies: []
+  # Public postings API. Verified the same way, 2026-07-28.
+  companies:
+    - ixigo                            # ixigo — Bengaluru/Gurgaon PM + partnerships
   limit: 100
   detail_top_n: 5              # full JD for the first N per company only
 
 ashby:
   # Public job-board API. Board name = the slug in jobs.ashbyhq.com/<board>.
+  # Checked 2026-07-28 against ~40 companies known to use Ashby (Notion, Ramp,
+  # Linear, Cursor, Vanta, Replit, Harvey, Zapier, Deliveroo, and several
+  # India-origin candidates) — NONE currently have an India-located PM/BA
+  # posting, so this ships empty rather than with tokens that would poll for
+  # nothing. Re-check periodically; Ashby is growing fast among India startups.
   boards: []
 
 # Job-alert email ingestion — the LEGITIMATE route to Naukri / LinkedIn /

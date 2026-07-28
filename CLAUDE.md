@@ -157,6 +157,35 @@ permanent maintenance tax on an unattended pipeline. Instead:
   portals). If Mehul asks again, this is the tradeoff to re-present — don't
   just build the scraper.
 
+**`greenhouse.tokens`/`lever.tokens`/`smartrecruiters.companies` populated
+2026-07-28** with 10 verified tokens (Razorpay, Stripe, Coinbase, Databricks,
+MongoDB, Okta, PhonePe, CRED, Meesho, ixigo). **Method — repeat this, don't
+guess slugs:** hit the real public API for each candidate (`GET
+boards-api.greenhouse.io/v1/boards/{token}/jobs`, `api.lever.co/v0/postings/
+{token}?mode=json`, `api.smartrecruiters.com/v1/companies/{token}/postings`,
+`api.ashbyhq.com/posting-api/job-board/{board}`), then check the RETURNED
+locations for a genuine India city/country string — a 200 response alone
+proves nothing, most tested companies (Groww, Zeta, Airbnb, Brex, Pinterest,
+Postman, and ~30 more) return valid JSON with zero actual India PM/BA
+postings. `ashby.boards` ships EMPTY on the same basis — none of ~40 checked
+companies (Notion, Ramp, Cursor, Vanta, Harvey, Replit, Zapier, Deliveroo, and
+more) had one. Re-check periodically; this is a snapshot, not a permanent
+fact about these companies.
+
+**Two real bugs found while verifying, both fixed:**
+1. `sources/ashby.py` joined `secondaryLocations` as if it were a list of
+   strings — it's actually a list of `{"location": ..., "address": {...}}`
+   objects, so real usage would `TypeError` and silently drop every
+   multi-location posting.
+2. `matcher.city_ok()`'s "remote always passes" rule let through region-locked
+   remote roles from global boards — "Chicago, IL, Remote", "US-Remote",
+   "Remote (Canada)" all passed the India-only cities filter. Fixed by
+   stripping filler words/separators from a "remote" location string and
+   requiring the residual be empty (or say India) rather than pattern-matching
+   a finite list of country names, which would have missed bare US city names
+   like "Chicago"/"Seattle" anyway. A bare "Remote" or "Remote, India" still
+   passes.
+
 **Learning loop (`feedback.py`).** The queue CSV has a `match_feedback` column
 (good/partial/no) you set in the dashboard's Learning tab. Once there are
 **25+ labels with 5+ in each class**, it proposes: title keywords to drop

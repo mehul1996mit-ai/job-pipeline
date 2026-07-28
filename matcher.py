@@ -73,12 +73,33 @@ def title_ok(title: str, allowlist: list[str]) -> bool:
     return any(kw.lower() in t for kw in allowlist)
 
 
+_REMOTE_FILLER_RE = re.compile(
+    r"\bremote\b|\bwork from home\b|\bwfh\b|[,\-–—/;()]", re.I)
+
+
 def city_ok(location: str, cities: list[str]) -> bool:
+    """"Remote" only passes when it's genuinely open. A global ATS board
+    (Greenhouse/Lever/SmartRecruiters/Ashby, added 2026-07-28) posts plenty of
+    "Chicago, IL, Remote" or "US-Remote" roles, and treating every "remote"
+    string as open let those through even though they're scoped to a specific
+    country or city Mehul can't work from.
+
+    Rather than list every country/region name (a losing game — it missed
+    bare US city names like "Chicago" and "Seattle" entirely), strip the
+    filler words and separators and see what's left. "Remote" or "Remote,
+    India" reduces to nothing (or "india") — genuinely open. "Chicago, IL,
+    Remote" reduces to "chicago il" — that leftover location detail means the
+    remote scope is restricted elsewhere, so it's excluded.
+    """
     if not cities:
         return True
     loc = (location or "").lower()
     if "remote" in loc:
-        return True
+        if "india" in loc:
+            return True
+        residual = _REMOTE_FILLER_RE.sub(" ", loc)
+        residual = re.sub(r"\s+", " ", residual).strip()
+        return not residual
     return any(c.lower() in loc for c in cities)
 
 

@@ -87,6 +87,17 @@ check("city allow: 'Remote - India'", matcher.city_ok("Remote - India",
 check("city reject: 'Chennai, TN'", not matcher.city_ok("Chennai, TN",
                                                         cities))
 check("city: empty allowlist accepts all", matcher.city_ok("Chennai", []))
+check("city allow: bare 'Remote' with no scope", matcher.city_ok("Remote", cities))
+# Found via real Greenhouse data 2026-07-28: global boards post plenty of
+# "Chicago, IL, Remote" / "US-Remote" postings, and the old "any remote
+# passes" rule let those through even though they're not open to India.
+check("city REJECT: 'Chicago, IL, Remote' (US-scoped, not India)",
+      not matcher.city_ok("Chicago, IL, Remote", cities))
+check("city REJECT: 'US-Remote'", not matcher.city_ok("US-Remote", cities))
+check("city REJECT: 'Remote (Canada)'",
+      not matcher.city_ok("Remote (Canada)", cities))
+check("city REJECT: 'Seattle, SF, Remote' (US cities, no country marker)",
+      not matcher.city_ok("Seattle, SF, Remote", cities))
 check("salary: no reported salary passes even with floor set",
       matcher.salary_ok({"salary_min": None, "salary_max": None}, 2000000))
 check("salary: reported below floor rejected",
@@ -546,6 +557,25 @@ check("job title read from the alert email's own link text",
 check("a 'View job' button falls back to the URL slug, not a fake title",
       job_alert_email._anchor_titles(
           '<a href="https://www.naukri.com/job-listings-x-1">View Job</a>') == {})
+
+# --- Ashby secondaryLocations parsing (real-API bug, found 2026-07-28) ----
+# secondaryLocations is a list of {"location": str, "address": {...}} objects,
+# not bare strings. Joining it directly raised TypeError and would have
+# silently dropped every multi-location Ashby posting.
+import unittest.mock as _mock
+_fake_job = {
+    "title": "Product Manager", "isListed": True,
+    "location": "",       # empty primary -> falls back to secondaryLocations
+    "secondaryLocations": [{"location": "Bengaluru", "address": {}}],
+    "descriptionPlain": "x", "jobUrl": "https://x", "publishedAt": "",
+}
+with _mock.patch("sources.ashby.requests.get") as _mget:
+    _mget.return_value.raise_for_status = lambda: None
+    _mget.return_value.json = lambda: {"jobs": [_fake_job]}
+    _rows = ashby.fetch({"ashby": {"boards": ["testco"]}}, log=lambda *a: None)
+check("Ashby secondaryLocations (list of objects) parses without crashing",
+      len(_rows) == 1 and "Bengaluru" in _rows[0]["location"],
+      f"({_rows[0]['location'] if _rows else 'no rows'})")
 
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)

@@ -42,12 +42,18 @@ def fetch(config, log=print):
         for j in jobs:
             if j.get("isListed") is False:
                 continue
+            # secondaryLocations is a list of {"location": str, "address": {...}}
+            # objects, not bare strings — joining it directly raises TypeError
+            # and would silently drop every multi-location posting (found while
+            # verifying candidate boards against the real API, 2026-07-28).
+            secondary = [sl.get("location", "") for sl in
+                        (j.get("secondaryLocations") or []) if isinstance(sl, dict)]
+            location = j.get("location", "") or ", ".join(filter(None, secondary))
             rows.append(normalize(
                 source="ashby",
                 company=board,
                 title=j.get("title", ""),
-                location=j.get("location", "") or ", ".join(
-                    j.get("secondaryLocations", []) or []),
+                location=location,
                 # descriptionPlain is provided directly — no HTML round-trip.
                 description=(j.get("descriptionPlain")
                              or _strip_html(j.get("descriptionHtml", ""))),
