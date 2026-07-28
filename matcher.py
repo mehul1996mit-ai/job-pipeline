@@ -3,13 +3,37 @@
 Filters: title keyword allowlist, city allowlist ("remote" always passes),
 experience band overlap, optional min salary (enforced only when the listing
 reports one). Domain keywords are a scoring BONUS only, never a filter.
+
+SCORING (ported from cv-match-copilot, 2026-07-28). Three layers, all
+deterministic, so every job gets all three at zero API cost:
+
+  legacy_score    — the original flat word-overlap score. Kept ONLY so the two
+                    formulas can be compared on real queues while the
+                    min_score_to_tailor floor is recalibrated. Not used for
+                    ranking.
+  frozen_score    — the ported frozen engine (stemmer + synonym folding,
+                    requirement lines weighted x2, bigrams as separate
+                    competencies, per-term cap, sqrt curve, domain bonus).
+  structured      — the multi-sub-score layer: skill match by evidence tier,
+                    experience fit, education gate, domain, achievement
+                    density, trajectory; minus penalties; plus a percentile
+                    calibrated against how demanding the posting itself is.
+
+`score_job()` returns all of them. The structured score is the one worth
+ranking on — it is the only one that knows the difference between a must-have
+you can evidence in a bullet and a preferred keyword you merely listed.
 """
 from __future__ import annotations
 
 import re
 from collections import Counter
 
+import calibrate
+import jd_analyst
+from aggregate import aggregate_score
 from cv_parser import keyword_set, tokenize, NOISE_WORDS
+from scoring_core import compute_match
+from skill_match import structured_skill_match
 
 # "3-5 years", "3 to 5 yrs", "3–5 years"
 RANGE_RE = re.compile(
@@ -84,7 +108,15 @@ def passes_filters(job: dict, config: dict) -> bool:
 
 
 def ats_score(jd_text: str, cv_keywords: set[str], config: dict) -> int:
-    """0-100: JD-vs-CV word overlap (scaled to 80) + up to 20 domain bonus."""
+    """LEGACY 0-100 scorer: flat JD-vs-CV word overlap (scaled to 80) + up to
+    20 domain bonus.
+
+    Superseded by frozen_score/score_job — it has no stemming, no synonym
+    folding, treats every JD word as equally important, and counts a bigram
+    competency as two unrelated words. Retained so the old and new formulas can
+    be compared on real job queues while the tailoring floor is recalibrated;
+    remove once that's settled.
+    """
     jd_kw = keyword_set(jd_text)
     if not jd_kw:
         return 0
@@ -97,6 +129,67 @@ def ats_score(jd_text: str, cv_keywords: set[str], config: dict) -> int:
     hits = sum(1 for k in domain if k in jd_lower)
     bonus = min(20.0, hits * (20.0 / max(len(domain) * 0.5, 1)))
     return int(round(min(100.0, base + bonus)))
+
+
+def _domain_keywords(config: dict):
+    return config.get("scoring", {}).get("domain_keywords") or None
+
+
+def frozen_score(jd_text: str, cv_text: str, config: dict) -> dict:
+    """The ported frozen engine. Full result dict, not just the number — the
+    matched/missing term lists explain the score."""
+    return compute_match(jd_text, cv_text,
+                         domain_keywords=_domain_keywords(config))
+
+
+def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
+              llm_analysis: dict | None = None) -> dict:
+    """Score one posting through every layer. Fully deterministic unless an
+    `llm_analysis` is supplied (from the tailoring call, which already happens
+    for the top-N jobs) — so this is safe to run on every listing.
+
+    Returns a flat dict suitable for stashing on the job record and writing to
+    the CSV, plus the nested structures the dashboard can expand.
+    """
+    analysis = jd_analyst.analyze_jd(jd_text)
+    if llm_analysis:
+        analysis = jd_analyst.merge_llm_analysis(analysis, llm_analysis)
+
+    frozen = frozen_score(jd_text, cv_text, config)
+    sm = structured_skill_match(analysis, structured_cv)
+
+    agg_kwargs = {
+        "jd_text": jd_text,
+        "cv_text": cv_text,
+        "domain_keywords": _domain_keywords(config),
+        "weights": config.get("scoring", {}).get("weights") or None,
+    }
+    agg = aggregate_score(analysis, structured_cv, sm, **agg_kwargs)
+    cal = calibrate.calibrate_score(agg["score"], analysis)
+    gaps = calibrate.counterfactual_gaps(analysis, structured_cv, sm,
+                                         agg_kwargs=agg_kwargs, limit=5)
+
+    return {
+        "score": agg["score"],                 # structured — rank on this
+        "frozen_score": frozen["score"],
+        "percentile": cal.get("percentile"),
+        "band": cal.get("band"),
+        "jd_difficulty": cal.get("difficulty"),
+        "analyst": analysis.get("analyst"),
+        "sub_scores": agg["sub_scores"],
+        "must_coverage": agg["must_coverage"],
+        "preferred_coverage": agg["preferred_coverage"],
+        "penalties": agg["penalties"],
+        "gates": agg["gates"],
+        "flags": agg["flags"],
+        "missing_must": [m["skill"] for m in sm["missing"] if m["tier"] == "must"],
+        "top_gaps": gaps["gaps"],
+        "matched_skills": [m["skill"] for m in sm["matched"][:12]],
+        "analysis": analysis,
+        "skill_match": sm,
+        "aggregate": agg,
+        "calibration": cal,
+    }
 
 
 def matched_keywords(jd_text: str, cv_keywords: set[str], top_n: int = 12):

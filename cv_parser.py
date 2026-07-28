@@ -18,6 +18,15 @@ SECTION_HEADINGS = {
     "skills": ("skills", "core competencies", "technical skills"),
     "experience": ("professional experience", "experience", "work experience",
                    "employment"),
+    # Needed by cv_structure.parse_cv_structured: it prefers this map over
+    # re-detecting headers itself, so a section missing HERE stays empty THERE.
+    # A missing education section silently armed the degree eligibility gate
+    # (CV degree read as "none") and hid the education-explained-gap fairness
+    # rule — don't drop these without checking that.
+    "education": ("education", "academic"),
+    "projects": ("projects", "key projects", "selected projects"),
+    "certifications": ("certifications", "certification", "licenses",
+                       "credentials"),
 }
 
 NOISE_WORDS = {
@@ -45,6 +54,15 @@ class ParsedCV:
     experience: str
     bullets: list[str] = field(default_factory=list)
     keywords: set[str] = field(default_factory=set)
+    education: str = ""
+    projects: str = ""
+    certifications: str = ""
+
+    def section_map(self) -> dict[str, str]:
+        """The shape cv_structure.parse_cv_structured expects."""
+        return {"summary": self.summary, "skills": self.skills,
+                "experience": self.experience, "education": self.education,
+                "projects": self.projects, "certifications": self.certifications}
 
 
 def tokenize(text: str) -> list[str]:
@@ -77,7 +95,7 @@ def _find_sections(text: str) -> dict[str, str]:
             # any ALL-CAPS short line ends the previous section too
             if clean and line.strip().isupper():
                 marks.append((i, None))
-    sections: dict[str, str] = {"summary": "", "skills": "", "experience": ""}
+    sections: dict[str, str] = {k: "" for k in SECTION_HEADINGS}
     for idx, (start, canon) in enumerate(marks):
         if canon is None:
             continue
@@ -129,6 +147,9 @@ def parse_cv(pdf_path: str | Path = "base_cv.pdf") -> ParsedCV:
         experience=sections["experience"],
         bullets=_extract_bullets(raw),
         keywords=keyword_set(raw),
+        education=sections.get("education", ""),
+        projects=sections.get("projects", ""),
+        certifications=sections.get("certifications", ""),
     )
 
 

@@ -86,6 +86,56 @@ Greenhouse/Lever), uploading the tailored resume, filling safe
 non-sensitive fields, then stopping before Submit for Mehul to confirm.
 LinkedIn/Naukri require his own login — hand him the link + tailored file.
 
+**Scoring stack (ported from `cv-match-copilot-gemini`, 2026-07-28).** The old
+scorer was a flat JD-vs-CV word overlap. It's been replaced by a port of the
+Chrome extension's engine, in Python, in three layers — all **deterministic**,
+so every job gets all three at zero API cost:
+
+1. `scoring_core.py` — the frozen formula: light stemmer + synonym folding,
+   requirement lines weighted ×2, **bigrams are separate competencies** (having
+   "credit" and "risk" apart does NOT match "credit risk"), per-term weight cap
+   8, `base = sqrt(coverage) × 80`, domain bonus +5/keyword capped at 20 and
+   **never a filter**.
+2. `cv_structure.py` + `skill_match.py` — structured CV (roles, tenure via
+   interval union, education-explained gaps, declared-vs-demonstrated skills)
+   and layered skill matching that weights a must-have you can evidence in a
+   bullet above a keyword you merely listed.
+3. `aggregate.py` + `calibrate.py` — six sub-scores → structured score, minus
+   penalties, with a hard cap when a *checkable* eligibility gate fails; plus a
+   percentile calibrated against how demanding the posting itself is, and
+   impact-ranked counterfactual gaps ("closing this moves you 62 → 78").
+
+`matcher.score_job()` is the entry point; `matcher.ats_score()` is the OLD
+scorer, kept only for formula comparison — don't rank on it.
+
+**Two guards in `smoke_test.py` are standing, not ordinary unit tests** (same
+convention as the source repo): the **acceptance regression** (a credit-risk JD
+must beat a marketing JD by >25 points while marketing still scores nonzero)
+and the **fairness audit** (an education-explained gap, a single-role CV, a
+step down in seniority, and a JD stating no minimum must never be scored near
+zero; an unverifiable gate is flagged for review, never auto-failed). If either
+fails, **fix the scorer, never the tolerance.**
+
+**Score floor recalibrated 55 → 50 (2026-07-28).** The old 55 was silently
+starving the pipeline — on the real 2026-07-16..27 queues only **1 of 12** jobs
+cleared it, so almost nothing was ever tailored (the dashboard's "Tailored: 0"
+was this, not a bug). Under the new structured score, 50 qualifies 7/12.
+Caveat: that measurement used `description_snippet`, which is truncated or
+empty for many rows — full JDs are only fetched for the top 8 Workday matches,
+so real scores run a little higher. Re-measure before changing the floor; the
+distribution is formula-specific.
+
+**JD analyst — why there are two.** The structured layer needs must-have vs
+preferred requirements. The extension called an LLM per posting because it only
+ever sees one page; this pipeline sees hundreds of listings a day, so a call
+per job would exhaust the Gemini free tier. So `jd_analyst.analyze_jd()` is a
+deterministic regex/clause extractor that runs on everything, and the
+**tailoring call for the top-N jobs also returns `jd_analysis`** — same call,
+extra JSON fields, zero additional API cost — which is merged over the
+deterministic read via `merge_llm_analysis()`. An empty or failed LLM analysis
+never blanks out a real regex finding, and `analyst` records which produced the
+result so a deterministic read is never presented as a model's.
+
 **Known quirks:**
 - Generated `.docx` files lock if left open in Word — regenerating into
   the same path then throws `PermissionError`. Write to a fresh path
@@ -103,6 +153,12 @@ LinkedIn/Naukri require his own login — hand him the link + tailored file.
 | `config.yaml` | All filters, Workday tenants, scoring, tailor settings |
 | `main.py` | Orchestrates the 4 stages |
 | `cv_parser.py` | PDF → text/sections/bullets/keywords |
+| `cv_structure.py` | Structured CV: roles, tenure, gaps, declared-vs-demonstrated skills |
+| `scoring_core.py` | Frozen match engine (stemmer, synonyms, bigrams, sqrt curve) |
+| `skill_match.py` | Layered skill matching (tier/source/recency/depth) |
+| `aggregate.py` | 6 sub-scores → structured score, penalties, eligibility gates |
+| `calibrate.py` | Percentile vs JD difficulty, counterfactual gaps, explainability |
+| `jd_analyst.py` | JD requirement extraction (deterministic + LLM merge) |
 | `sources/{adzuna,workday,greenhouse,lever}.py` | Job sources, normalized schema |
 | `matcher.py` | Filters + ATS scoring + missing-keyword extraction |
 | `dedupe.py` | Cross-source dedupe (direct ATS beats aggregator) + seen-store |

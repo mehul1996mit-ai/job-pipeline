@@ -39,10 +39,17 @@ filters:
   # Annual INR. Enforced ONLY when the listing itself reports a salary.
   # Set to null to disable.
   min_salary_annual: null
-  # Jobs scoring below this (0-100 ATS fit score) are still listed in the
-  # CSV/digest for visibility, but are NOT tailored -- no point investing a
+  # Jobs scoring below this (0-100 STRUCTURED fit score) are still listed in
+  # the CSV/digest for visibility, but are NOT tailored -- no point investing a
   # tailored resume in a weak fit. Raise for stricter targeting.
-  min_score_to_tailor: 55
+  #
+  # RECALIBRATED 2026-07-28 (55 -> 50) when scoring moved to the ported
+  # structured formula. The old value was silently starving the pipeline: on
+  # the real 2026-07-16..27 queues only 1 of 12 jobs cleared 55 under the old
+  # scorer, so almost nothing was ever tailored. Measured on those same queues,
+  # 50 qualifies 7/12 -- a realistic daily tailoring volume against top_n: 25.
+  # Re-measure before changing this; the score distribution is formula-specific.
+  min_score_to_tailor: 50
   # true = only remote / work-from-home listings pass.
   remote_only: false
 
@@ -58,6 +65,17 @@ scoring:
     - loan
     - bfsi
     - digital banking
+  # Structured sub-score weights. Omit to use the defaults in aggregate.py.
+  # trajectory is deliberately the SMALLEST weight: a non-linear career (a step
+  # sideways, a level down to change domain) is not a defect, and weighting it
+  # heavily is how a scorer starts quietly penalising people for real lives.
+  weights:
+    skill_match: 0.40
+    experience_fit: 0.20
+    domain: 0.15
+    education: 0.10
+    achievement: 0.10
+    trajectory: 0.05
 
 # ------------------------------------------------------------------ sources
 adzuna:

@@ -25,6 +25,7 @@ import resume_render
 import tailor as tailor_mod
 import tracker
 from cv_parser import parse_cv, keyword_set
+from cv_structure import parse_cv_structured
 from sources import adzuna, greenhouse, lever, workday
 
 
@@ -49,6 +50,14 @@ def main():
     cv = parse_cv("base_cv.pdf")
     log(f"   cv: {len(cv.raw_text)} chars, {len(cv.bullets)} bullets, "
         f"{len(cv.keywords)} keywords")
+    # Structured parse — roles/tenure/gaps/declared-vs-demonstrated skills.
+    # Deterministic and done ONCE per run; every job is scored against it.
+    structured_cv = parse_cv_structured(cv.raw_text, cv.section_map())
+    log(f"   structured: {structured_cv['role_count']} roles, "
+        f"{structured_cv['total_years']} yrs, "
+        f"{len(structured_cv['skills']['declared'])} declared / "
+        f"{len(structured_cv['skills']['demonstrated'])} demonstrated skills, "
+        f"{len(structured_cv['unexplained_gaps'])} unexplained gap(s)")
     master_resume = json.loads(
         Path("resume_master.json").read_text(encoding="utf-8"))
 
@@ -75,9 +84,27 @@ def main():
     new_jobs = dedupe.filter_new(jobs, seen)
     log(f"   NEW (not in seen-store): {len(new_jobs)}")
 
+    def rescore(j):
+        """Full scoring stack for one job. Deterministic — no API calls — so
+        it is safe to run on every listing and again after a full JD arrives."""
+        jd_text = f"{j['title']} {j.get('description', '')}"
+        r = matcher.score_job(jd_text, cv.raw_text, structured_cv, config)
+        j.update({
+            "score": r["score"],
+            "frozen_score": r["frozen_score"],
+            "legacy_score": matcher.ats_score(jd_text, cv.keywords, config),
+            "percentile": r["percentile"],
+            "band": r["band"],
+            "jd_difficulty": r["jd_difficulty"],
+            "must_coverage": r["must_coverage"],
+            "missing_must": r["missing_must"],
+            "top_gaps": r["top_gaps"],
+            "score_flags": r["flags"],
+            "jd_analysis": r["analysis"],
+        })
+
     for j in new_jobs:
-        j["score"] = matcher.ats_score(
-            f"{j['title']} {j['description']}", cv.keywords, config)
+        rescore(j)
     new_jobs.sort(key=lambda j: j["score"], reverse=True)
 
     # Politeness cap: full JDs for the top N Workday matches only, then
@@ -91,8 +118,7 @@ def main():
                 j["workday_tenant"], j["workday_external_path"], log=log)
             if full:
                 j["description"] = full
-                j["score"] = matcher.ats_score(
-                    f"{j['title']} {full}", cv.keywords, config)
+                rescore(j)      # full JD -> real requirement extraction
             time.sleep(1.0)
         new_jobs.sort(key=lambda j: j["score"], reverse=True)
 
@@ -117,6 +143,28 @@ def main():
     for i, j in enumerate(to_tailor, 1):
         j["tailored"] = tailor_mod.tailor_job(
             cv.raw_text, j, j["missing_keywords"], config, log=log)
+
+        # The tailoring call also returns the model's read of the POSTING's
+        # requirements. Re-score with it: a model that actually read the JD
+        # classifies must-have vs preferred far better than the regex analyst,
+        # and this costs no extra API call. A failed/empty analysis leaves the
+        # deterministic score untouched (see jd_analyst.merge_llm_analysis).
+        llm_analysis = (j["tailored"] or {}).get("jd_analysis")
+        if llm_analysis:
+            before = j["score"]
+            r = matcher.score_job(
+                f"{j['title']} {j.get('description', '')}", cv.raw_text,
+                structured_cv, config, llm_analysis=llm_analysis)
+            j.update({
+                "score": r["score"], "percentile": r["percentile"],
+                "band": r["band"], "jd_difficulty": r["jd_difficulty"],
+                "must_coverage": r["must_coverage"],
+                "missing_must": r["missing_must"], "top_gaps": r["top_gaps"],
+                "score_flags": r["flags"],
+            })
+            if r["score"] != before:
+                log(f"   rescored on model JD read: {before} -> {r['score']} "
+                    f"({j['title'][:40]})")
 
         # Render an actual tailored resume file (reorder-only, never
         # fabricated) so the semi-assisted apply flow has something real

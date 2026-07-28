@@ -54,8 +54,22 @@ these keys:
     "gaps": ["JD requirements the CV does not demonstrate at all"]
   }},
   "outreach_note": "a 2-3 sentence LinkedIn message to the recruiter/hiring manager for this role: specific to this job, references 1-2 real CV facts, no flattery filler, no fabrication, under 300 characters",
-  "honest_gap_note": "one sentence: what this JD asks for that the CV does not demonstrate"
+  "honest_gap_note": "one sentence: what this JD asks for that the CV does not demonstrate",
+  "jd_analysis": {{
+    "must_have_skills": ["skills/competencies the JD states as REQUIRED — read from the posting only, never from the CV"],
+    "preferred_skills": ["skills the JD frames as preferred / nice-to-have / a plus"],
+    "key_skills": ["other genuine competencies the posting names"],
+    "min_years": null,
+    "education_level": "the degree the JD requires, e.g. bachelor / master / mba — empty string if it states none",
+    "mandatory_eligibility": ["hard gates a resume cannot prove: visa/work authorization, clearance, licence, mandatory relocation — omit anything the JD does not actually demand"]
+  }}
 }}
+
+For jd_analysis: extract what the POSTING asks for, independent of this
+candidate. It feeds the fit score, so a requirement invented here inflates the
+score against a job that never asked for it, and a real must-have dropped here
+hides a genuine gap. `min_years` is a number or null — null when the posting
+states no minimum. Do not copy skills over from the CV.
 
 For rewritten_bullets: rewrite the 4-6 bullets MOST relevant to this JD.
 Example of a good rewrite: if the JD says "client activation" and the CV
@@ -68,7 +82,7 @@ EMPTY = {"tailored_summary": "", "bullets_to_lead_with": [],
          "rewritten_bullets": [], "keywords_to_add_if_true": [],
          "fit_analysis": {"exact_matches": [], "partial_matches": [],
                           "gaps": []},
-         "outreach_note": "", "honest_gap_note": ""}
+         "outreach_note": "", "honest_gap_note": "", "jd_analysis": {}}
 
 
 def _extract_json(text: str) -> dict:

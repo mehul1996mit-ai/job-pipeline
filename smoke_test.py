@@ -296,5 +296,164 @@ check("stats reports applied count", "applied: 3" in stats)
 check("stats reports positive-response rate", "1/3" in stats)
 check("stats breaks down by score band", "80+" in stats)
 
+print("\n== 9. PORTED SCORING STACK (frozen engine + structured layer)")
+import scoring_core
+import jd_analyst
+from aggregate import aggregate_score, trajectory_score, experience_fit
+from calibrate import calibrate_score, counterfactual_gaps, jd_difficulty
+from cv_structure import parse_cv_structured, union_months, find_gaps
+from skill_match import structured_skill_match
+
+# --- tokenizer / stemmer -------------------------------------------------
+check("stemmer folds inflections", scoring_core.stem("modelling")
+      == scoring_core.stem("models") == "model")
+check("synonyms fold to one canonical",
+      scoring_core.token_parts("js")["canon"]
+      == scoring_core.token_parts("javascript")["canon"])
+check("stopwords dropped", scoring_core.canonical_token("the") is None)
+check("short abbreviations survive via synonyms",
+      scoring_core.canonical_token("k8s") is not None)
+check("js_round rounds halves up (not banker's)",
+      scoring_core.js_round(2.5) == 3 and scoring_core.js_round(3.5) == 4)
+
+# --- bigrams are separate competencies -----------------------------------
+both_words_apart = scoring_core.compute_match(
+    "credit risk modelling required", "I know credit. I know risk.")
+real_bigram = scoring_core.compute_match(
+    "credit risk modelling required", "I did credit risk modelling.")
+check("bigram needs the CV's own bigram, not both words separately",
+      real_bigram["score"] > both_words_apart["score"],
+      f"({real_bigram['score']} > {both_words_apart['score']})")
+
+# --- FROZEN ACCEPTANCE REGRESSION ---------------------------------------
+# Ported from the source repo, where it is treated as permanent. If this
+# fails, fix the scorer -- never loosen the threshold.
+CREDIT_JD = """Required: credit risk, digital lending, loan origination,
+product management, BRDs, stakeholder management. Must have fintech and NBFC
+experience with credit policy and lending partnerships."""
+MARKETING_JD = """Required: brand management, ATL BTL campaigns, trade
+marketing, shopper activation, TV production, creative agency management for
+an FMCG foods portfolio."""
+c = scoring_core.compute_match(CREDIT_JD, cv.raw_text)["score"]
+m = scoring_core.compute_match(MARKETING_JD, cv.raw_text)["score"]
+check("ACCEPTANCE: credit JD beats marketing JD by >25", c - m > 25,
+      f"(credit {c} vs marketing {m}, delta {c - m})")
+check("ACCEPTANCE: marketing JD still scores nonzero", m > 0, f"({m})")
+check("domain bonus is additive, never a filter",
+      scoring_core.compute_match(MARKETING_JD, cv.raw_text)["bonus"] == 0
+      and m > 0, "(zero domain bonus, still scored)")
+
+# --- structured CV parse -------------------------------------------------
+scv = parse_cv_structured(cv.raw_text, cv.section_map())
+check("roles parsed from real CV", scv["role_count"] >= 3,
+      f"({scv['role_count']} roles)")
+check("every role has a title and an employer",
+      all(e["title"] and e["company"] for e in scv["experience"]),
+      str([f"{e['title'][:24]}@{e['company']}" for e in scv["experience"]]))
+check("tenure computed", 3 <= scv["total_years"] <= 8,
+      f"({scv['total_years']} yrs)")
+check("declared vs demonstrated skills kept separate",
+      len(scv["skills"]["declared"]) > len(scv["skills"]["demonstrated"]) > 0,
+      f"({len(scv['skills']['declared'])} declared, "
+      f"{len(scv['skills']['demonstrated'])} demonstrated)")
+check("education section found (arms the degree gate correctly)",
+      bool(scv["sections"]["education"]))
+check("overlapping roles are not double-counted",
+      union_months([{"start": 0, "end": 24}, {"start": 12, "end": 36}]) == 36)
+check("gaps below threshold are not reported",
+      find_gaps([{"start": 0, "end": 12}, {"start": 14, "end": 24}], 3) == [])
+
+# --- FAIRNESS AUDIT (standing; fix the scorer, never the tolerance) ------
+check("FAIRNESS: education-explained gap is not counted against the CV",
+      len(scv["unexplained_gaps"]) == 0,
+      f"({len(scv['gaps'])} gap(s), all explained by study)")
+check("FAIRNESS: a single-role CV is not punished on trajectory",
+      trajectory_score([{"title": "Product Manager"}]) >= 0.7)
+step_down = trajectory_score([{"title": "Product Manager"},
+                              {"title": "Head of Product"}])
+check("FAIRNESS: a step down in seniority is not scored near zero",
+      step_down >= 0.5, f"({step_down})")
+check("FAIRNESS: no stated minimum experience scores neutral-high, not zero",
+      experience_fit(2, 0) >= 0.8, f"({experience_fit(2, 0)})")
+check("FAIRNESS: unverifiable gate is flagged for review, never auto-failed",
+      (lambda a: not a["gates"]["failed_checkable"]
+       and any("confirm manually" in f for f in a["flags"]))(
+          aggregate_score({"mandatory_eligibility": ["US work authorization"]},
+                          scv, {"skill_score": 0.5})))
+
+# --- JD analyst ----------------------------------------------------------
+a = jd_analyst.analyze_jd(SAMPLE_JD)
+check("analyst reads a minimum-years requirement", a["min_years"] == 3,
+      f"({a['min_years']})")
+check("analyst separates preferred from must-have",
+      isinstance(a["preferred_skills"], list)
+      and "deterministic" == a["analyst"])
+check("analyst does not span clause boundaries",
+      not any(" agile" in s and "management" in s
+              for s in a["must_have_skills"] + a["preferred_skills"]),
+      "(commas break phrase runs)")
+merged = jd_analyst.merge_llm_analysis(
+    a, {"must_have_skills": ["product management"], "min_years": 5})
+check("LLM analysis overrides the regex read", merged["min_years"] == 5
+      and merged["analyst"] == "llm")
+check("empty LLM fields never blank out a real regex finding",
+      jd_analyst.merge_llm_analysis(a, {"must_have_skills": []}
+                                    )["must_have_skills"] == a["must_have_skills"])
+check("a failed LLM call leaves the analysis deterministic",
+      jd_analyst.merge_llm_analysis(a, None)["analyst"] == "deterministic")
+
+# --- structured scoring / eligibility gate -------------------------------
+JD_OK = {"must_have_skills": ["product management", "stakeholder management"],
+         "preferred_skills": ["google analytics"], "key_skills": [],
+         "min_years": 3, "education_level": "bachelor",
+         "mandatory_eligibility": [], "jd_text": SAMPLE_JD}
+sm = structured_skill_match(JD_OK, scv)
+check("demonstrated skill outweighs a declared-only one",
+      all(x["source"] in ("demonstrated", "declared") for x in sm["matched"])
+      and sm["skill_score"] > 0, f"(skill_score {sm['skill_score']:.2f})")
+agg = aggregate_score(JD_OK, scv, sm, cv_text=cv.raw_text, jd_text=SAMPLE_JD)
+check("structured score in range", 0 <= agg["score"] <= 100, f"({agg['score']})")
+check("real CV clears the bachelor gate (MBA + B.Tech present)",
+      not agg["gates"]["failed_checkable"])
+
+JD_PHD = dict(JD_OK, education_level="phd")
+agg_phd = aggregate_score(JD_PHD, scv, sm, cv_text=cv.raw_text)
+check("unmet checkable degree gate hard-caps the score",
+      agg_phd["score"] <= 40 and agg_phd["gates"]["failed_checkable"],
+      f"({agg_phd['score']})")
+
+# --- calibration + counterfactual gaps -----------------------------------
+easy = jd_difficulty({"must_have_skills": ["excel"], "preferred_skills":
+                      ["word", "ppt", "email"]})["difficulty"]
+hard = jd_difficulty({"must_have_skills": ["a", "b", "c", "d", "e", "f"],
+                      "min_years": 10, "education_level": "phd",
+                      "mandatory_eligibility": ["visa", "clearance"]})["difficulty"]
+check("a narrow senior gated JD scores harder than a broad one", hard > easy,
+      f"({hard} > {easy})")
+check("an unclassified posting is 'unknown' (0.5), never assumed easy",
+      jd_difficulty({})["factors"]["narrowness"] == 0.5)
+same = 70
+check("same raw score reads higher on the harder posting",
+      calibrate_score(same, {"must_have_skills": ["a", "b", "c", "d", "e", "f"],
+                             "min_years": 10})["percentile"]
+      > calibrate_score(same, {"must_have_skills": ["excel"]})["percentile"])
+gaps = counterfactual_gaps(JD_OK, scv, sm,
+                           agg_kwargs={"cv_text": cv.raw_text}, limit=5)
+check("counterfactual gaps ranked by impact, descending",
+      all(gaps["gaps"][i]["delta"] >= gaps["gaps"][i + 1]["delta"]
+          for i in range(len(gaps["gaps"]) - 1)))
+check("gaps report a real before->after delta",
+      all(g["to"] > g["from"] for g in gaps["gaps"]))
+
+# --- end-to-end via matcher ---------------------------------------------
+r = matcher.score_job(SAMPLE_JD, cv.raw_text, scv, config)
+check("score_job returns structured + frozen + percentile",
+      isinstance(r["score"], int) and isinstance(r["frozen_score"], int)
+      and 1 <= r["percentile"] <= 99,
+      f"(structured {r['score']}, frozen {r['frozen_score']}, "
+      f"pct {r['percentile']})")
+check("scoring runs with no API key set (fully deterministic)",
+      r["analyst"] == "deterministic")
+
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)

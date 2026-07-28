@@ -74,9 +74,14 @@ with tab_queue:
                    "get a Telegram follow-up nudge after 7 days.")
         if "applied_on" not in df.columns:
             df["applied_on"] = ""
+        # Scoring columns added 2026-07-28. Queues written before that don't
+        # have them, so only show the ones this file actually carries.
+        score_cols = [c for c in ("percentile", "band", "must_coverage")
+                      if c in df.columns]
+        view_cols = (["applied", "score"] + score_cols
+                     + ["title", "company", "location", "source", "url"])
         edited = st.data_editor(
-            df[["applied", "score", "title", "company", "location",
-                "source", "url"]],
+            df[view_cols],
             column_config={
                 "applied": st.column_config.SelectboxColumn(
                     "applied",
@@ -84,10 +89,22 @@ with tab_queue:
                              "rejected", "offer"],
                     width="small"),
                 "url": st.column_config.LinkColumn("link"),
-                "score": st.column_config.NumberColumn(width="small"),
+                "score": st.column_config.NumberColumn(
+                    "fit", width="small",
+                    help="Structured fit score 0-100: skill match by evidence "
+                         "tier, experience, education gate, domain, "
+                         "achievement density, trajectory — minus penalties."),
+                "percentile": st.column_config.NumberColumn(
+                    "pct", width="small",
+                    help="Fit percentile calibrated against how demanding THIS "
+                         "posting is, so scores compare across jobs. Modelled "
+                         "comparability, not measured applicant data."),
+                "must_coverage": st.column_config.TextColumn(
+                    "must", width="small",
+                    help="How many of the posting's must-have requirements "
+                         "your CV evidences."),
             },
-            disabled=["score", "title", "company", "location", "source",
-                      "url"],
+            disabled=[c for c in view_cols if c != "applied"],
             hide_index=True, use_container_width=True, height=380)
         if st.button("💾 Save applied-status changes"):
             from datetime import date as _date

@@ -23,8 +23,63 @@ auto-submission should be declined with a pointer to this section.
 |---|---|---|
 | 1. PARSE | `cv_parser.py` | `base_cv.pdf` → raw text, summary/skills/experience sections, every bullet, keyword set. Matching always uses the full CV text. |
 | 2. SEARCH | `sources/adzuna.py`, `sources/workday.py`, `sources/greenhouse.py`, `sources/lever.py` | Adzuna aggregator (broad titles, ALL industries) + Workday CXS feeds for 9 employers (Citi, Deutsche Bank, Wells Fargo, Mastercard, PayPal, State Street, BlackRock, Adobe, Salesforce — all probed and confirmed publicly open) + Greenhouse & Lever (empty token lists — add confirmed companies). Cross-source duplicates keep the DIRECT employer-ATS link over aggregator redirects. All normalized to one schema. |
-| 3. MATCH & SCORE | `matcher.py`, `dedupe.py` | Config-driven filters (title / city / experience band / optional salary floor), ATS score 0–100 (word overlap + domain BONUS — never a filter), cross-source dedupe, persistent seen-store so each run reports only NEW jobs. Full JDs fetched for the top 8 Workday matches only. |
+| 3. MATCH & SCORE | `matcher.py`, `dedupe.py`, `cv_structure.py`, `scoring_core.py`, `skill_match.py`, `aggregate.py`, `calibrate.py`, `jd_analyst.py` | Config-driven filters (title / city / experience band / optional salary floor), then a three-layer **deterministic** fit score (see below), cross-source dedupe, persistent seen-store so each run reports only NEW jobs. Full JDs fetched for the top 8 Workday matches only. |
 | 4. TAILOR & DELIVER | `tailor.py`, `resume_render.py`, `report.py`, `notify.py` | Free-tier LLM (gemini default / groq / anthropic) returns strict JSON: tailored summary, lead bullets, **JD-vocabulary bullet rewrites**, truthful keywords, honest gap note — **never invents experience**. `tailor.build_tailored_resume()` applies: bullet reorder, validated rewording (every rewrite must keep all numbers/metrics identical and stay in a sane length band, else the original wording is kept), skill-group reorder, and skill-item reorder toward JD mentions. Only jobs scoring ≥ `filters.min_score_to_tailor` get tailored — weak fits stay visible in the CSV but don't get a resume. Renders per-job **DOCX + PDF** under `data/resumes/<date>/<company>_<title>/`, writes `data/job_queue_YYYY-MM-DD.csv`, and sends a Telegram digest. |
+
+## Fit scoring — three layers, no API calls
+
+Ported from the CV Match Copilot Chrome extension (2026-07-28). Every layer is
+deterministic, so every listing gets scored at zero API cost.
+
+**1. Frozen keyword engine (`scoring_core.py`).**
+`score = base(0–80) + domain bonus(0–20)`, `base = round(sqrt(coverage) × 80)`.
+Tokens are canonicalized before matching (light stemmer: modelling/models →
+model; synonym folding: js → javascript), requirement-looking JD lines weigh
+×2, and **consecutive-word bigrams are separate competencies at ×2 that only
+match the CV's own bigrams** — having "credit" and "risk" in different
+sentences does not count as "credit risk". Per-term weight cap 8. The sqrt
+curve exists because real JDs rarely exceed ~60% raw coverage, so linear
+scaling pins every honest score in the low band. The domain bonus is additive
+only and **never a filter** — strong matches from other industries are never
+hidden.
+
+**2. Structured CV + layered skill match (`cv_structure.py`, `skill_match.py`).**
+The CV is parsed into roles, tenure (interval *union*, so overlapping roles
+aren't double-counted), employment gaps, education, and — kept deliberately
+separate — **declared** skills (your Skills section) vs **demonstrated** ones
+(those that also appear in an experience bullet). Skills then match in layers
+(exact > alias > stem > phrase) and are weighted by requirement tier (must-have
+3× vs preferred 1×), source (demonstrated 1.0 vs declared-only 0.5 — an
+anti-gaming discount), recency decay, and depth of evidence. A CV that mirrors
+the posting's exact phrasing is flagged as possible keyword stuffing.
+
+**3. Sub-scores, penalties, calibration (`aggregate.py`, `calibrate.py`).**
+Six sub-scores — skill match, experience fit, education, domain, achievement
+density, trajectory — blended by configurable weights, minus penalties for
+unexplained gaps and verbatim mirroring. A **checkable** eligibility gate that
+fails (a required degree the CV lacks) hard-caps the score, because skill
+overlap doesn't outscore ineligibility; an **unverifiable** gate (visa,
+clearance, licence) is *flagged for human review, never auto-failed*. Finally
+the score is calibrated into a percentile against how demanding that specific
+posting is, and unmet requirements are ranked by **score impact** rather than
+by how often the JD repeats a word.
+
+**Fairness is a standing test, not a footnote.** `smoke_test.py` permanently
+asserts that an education-explained career gap, a single-role CV, a step down
+in seniority, and a posting stating no minimum experience are never scored near
+zero — and that trajectory carries the *smallest* weight, because a non-linear
+career is not a defect. If those checks fail, the scorer gets fixed, not the
+tolerance. The same file carries the frozen engine's acceptance regression (a
+credit-risk JD must beat a marketing JD by >25 points, with marketing still
+scoring nonzero).
+
+**Requirement extraction.** `jd_analyst.py` reads must-have vs preferred
+skills, minimum years, degree level and eligibility gates from the posting. It
+runs deterministically on every job; for the top-N jobs that get tailored, the
+tailoring LLM call *also* returns its own read of the posting (same call, extra
+fields, no additional cost), which is merged over the deterministic one. A
+failed or empty model response never blanks out a real regex finding, and every
+result records which analyst produced it.
 
 ## Follow-ups & weekly stats (`tracker.py`)
 

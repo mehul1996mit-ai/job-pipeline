@@ -10,6 +10,11 @@ from pathlib import Path
 
 COLUMNS = ["applied", "applied_on", "score", "title", "company",
            "location", "url",
+           # Scoring detail (ported scoring stack, 2026-07-28). `score` is the
+           # structured score; these explain it rather than restate it.
+           "frozen_score", "legacy_score", "percentile", "band",
+           "jd_difficulty", "must_coverage", "missing_must", "top_gaps",
+           "score_flags",
            "source", "apply_channel", "salary_min", "salary_max",
            "updated_at", "resume_docx", "resume_pdf",
            "tailored_summary", "bullets_to_lead_with",
@@ -37,6 +42,20 @@ def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
                 "company": j.get("company", ""),
                 "location": j.get("location", ""),
                 "url": j.get("url", ""),
+                "frozen_score": j.get("frozen_score", ""),
+                "legacy_score": j.get("legacy_score", ""),
+                "percentile": j.get("percentile", ""),
+                "band": j.get("band", ""),
+                "jd_difficulty": j.get("jd_difficulty", ""),
+                "must_coverage": (
+                    f"{(j.get('must_coverage') or {}).get('hit', 0)}/"
+                    f"{(j.get('must_coverage') or {}).get('total', 0)}"
+                    if j.get("must_coverage") else ""),
+                "missing_must": ", ".join(j.get("missing_must", []) or []),
+                "top_gaps": json.dumps(
+                    [{"need": g["requirement"], "gain": g["delta"]}
+                     for g in (j.get("top_gaps") or [])], ensure_ascii=False),
+                "score_flags": "; ".join(j.get("score_flags", []) or []),
                 "source": j.get("source", ""),
                 "apply_channel": j.get("apply_channel", ""),
                 "salary_min": j.get("salary_min") or "",
