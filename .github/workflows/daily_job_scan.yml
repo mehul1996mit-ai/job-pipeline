@@ -61,3 +61,27 @@ jobs:
             git pull --rebase origin main
             git push origin main
           fi
+
+      - name: Wake Streamlit dashboard
+        if: always()
+        continue-on-error: true
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+          python - <<'PY'
+          from playwright.sync_api import sync_playwright
+
+          url = "https://job-1357.streamlit.app"
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              page = browser.new_page()
+              page.goto(url, timeout=60000)
+              wake_button = page.get_by_text("Yes, get this app back up!")
+              if wake_button.count():
+                  wake_button.click()
+                  page.wait_for_timeout(20000)
+                  print("Dashboard was asleep — woke it up.")
+              else:
+                  print("Dashboard already awake — nothing to do.")
+              browser.close()
+          PY
