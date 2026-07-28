@@ -185,9 +185,26 @@ tailor:
   gemini_model: gemini-flash-lite-latest
   groq_model: llama-3.3-70b-versatile
   anthropic_model: claude-opus-4-8
-  top_n: 25                    # tailor this many top matches per run
+  # Raised 25 -> 50 on 2026-07-28 after fixing Adzuna's dead credentials
+  # (see CLAUDE.md): daily NEW volume jumped from ~10 to ~287 once it started
+  # authenticating, so 25 tailored resumes/day was covering under 10% of the
+  # qualifying jobs. Measured cost of raising this: the 2026-07-28 run
+  # tailored 25 jobs in 76s (~3s/job, all first-try, zero 429/503 retries) --
+  # 50 should land around 2.5 min, nowhere near the 30-min workflow timeout.
+  # Gemini's exact free-tier daily/per-minute quota isn't something I can
+  # verify from here, so this is a measured-safe increase, not a maxed-out
+  # one -- watch the "tailor: gemini 429/503" retry log line in future runs
+  # before raising further.
+  top_n: 50                    # tailor this many top matches per run
 
 # ------------------------------------------------------------------- digest
 digest:
-  top_n: 15                    # jobs in the Telegram digest
+  # Raised 15 -> 50 on 2026-07-28 to match tailor.top_n, per explicit request:
+  # "top 50 jobs visible every day, selected by match score." notify.py
+  # already chunks the message under Telegram's 4096-char limit
+  # (MAX_LEN = 3900), so this is not a technical constraint -- both this and
+  # tailor.top_n slice the SAME score-sorted list (main.py: new_jobs.sort by
+  # score descending happens before either selection), so "top 50" here and
+  # "top 50 tailored" are the identical 50 jobs, not two different cuts.
+  top_n: 50                    # jobs in the Telegram digest
   followup_days: 7             # nudge after N days with no recorded response
