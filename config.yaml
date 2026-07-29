@@ -4,18 +4,42 @@ profile:
 
 # --------------------------------------------------------------- job search
 search:
-  # Broad, generic title searches across ALL industries (Adzuna + Workday
-  # matching downstream is done against the full CV, not these strings).
+  # Skill-cluster-derived title list (see CLAUDE.md, 2026-07-29 revision) --
+  # each title maps to a capability actually evidenced in resume_master.json,
+  # not a guess. Matching downstream is still done against the full CV.
   titles:
     - Product Manager
     - Senior Product Manager
+    - Digital Product Manager
+    - Product Owner
+    - Platform Product Manager
+    - Technical Product Manager
+    - Growth Product Manager
+    - AI Product Manager
+    - Partnership Manager
+    - Channel Manager
     - Business Analyst
     - Senior Business Analyst
+    - Product Analyst
+    - Program Manager
+    - Project Manager
+    - Growth Manager
+    - Performance Marketing Manager
+
+  # Narrower subset for SerpApi (Google Jobs) -- free tier is capped at
+  # 250 searches/month. 5 broad terms x 30 days = ~150/month, leaving
+  # headroom for pagination and repeated debug runs. Domain-narrowed
+  # variants (Lending PM, Fintech PM, etc.) are deliberately excluded here --
+  # the scoring bonus for lending/credit/fintech (see scoring.domain_keywords)
+  # already surfaces those roles from the broad "Product Manager" query, so
+  # a dedicated SerpApi query would spend quota without adding qualification,
+  # only search-rank depth (see CLAUDE.md).
+  serpapi_titles:
+    - Product Manager
+    - Business Analyst
     - Partnership Manager
-    - Alliance Manager
     - Program Manager
     - Growth Manager
-    - Product Owner
 
 # ------------------------------------------------------------------ filters
 filters:
@@ -29,6 +53,10 @@ filters:
     - growth lead
     - partnership
     - alliance
+    - channel manager
+    - product analyst
+    - project manager
+    - performance marketing manager
   # City allowlist. Empty list = accept all cities. "remote" always passes.
   cities:
     - pune
@@ -150,6 +178,21 @@ smartrecruiters:
     - ixigo                            # ixigo — Bengaluru/Gurgaon PM + partnerships
   limit: 100
   detail_top_n: 5              # full JD for the first N per company only
+
+serpapi:
+  # Google Jobs via SerpApi -- paid-tier route to Naukri/LinkedIn/Indeed
+  # coverage (see CLAUDE.md, 2026-07-29). Off by default: needs SERPAPI_KEY
+  # and an explicit flip to enabled: true. Uses search.serpapi_titles, a
+  # narrower subset of the main title list, to stay under the free plan's
+  # 250 searches/month.
+  enabled: true
+  monthly_quota: 250
+  quota_buffer: 20             # stop this many searches short of the cap
+  max_pages_per_title: 2        # 20 results/title; ~300 calls/month across
+                                 # 5 titles, over the 250 free cap -- the
+                                 # quota_buffer guard stops early and logs it
+                                 # rather than erroring, so some days late in
+                                 # the month will get fewer/no SerpApi results
 
 ashby:
   # Public job-board API. Board name = the slug in jobs.ashbyhq.com/<board>.

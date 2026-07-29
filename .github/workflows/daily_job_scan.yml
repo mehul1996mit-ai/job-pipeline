@@ -53,6 +53,7 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add data/seen_jobs.json data/job_queue_*.csv
           [ -f data/followups.json ] && git add data/followups.json
+          [ -f data/serpapi_usage.json ] && git add data/serpapi_usage.json
           true
           if git diff --cached --quiet; then
             echo "Nothing to commit."

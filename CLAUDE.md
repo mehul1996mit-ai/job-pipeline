@@ -4,7 +4,33 @@ Read this file first in any new session on this project. It has the
 current status; `README.md` has full architecture/setup detail and
 `GCC_COVERAGE_GUIDE.md` has the manual-application layer.
 
-## STATUS (last updated 2026-07-28)
+## STATUS (last updated 2026-07-29)
+
+**⚠️ Read before judging any volume/yield number from 2026-07-29.** `main.py`
+was run FOUR times that day (env-var debugging, then testing the new title
+list, then testing the new SerpApi source) — each run adds that day's
+qualifying jobs to `data/seen_jobs.json`, so by the fourth run almost
+everything had already been marked seen. That day's "9 new jobs" and its
+`seen_jobs.json`/`job_queue_2026-07-29.csv` entry counts are testing-inflated,
+not a real day's volume — don't compare a future day against them or read
+them as a regression. Judge volume against a day with exactly one scheduled
+run instead.
+
+**New job-title list + SerpApi source added 2026-07-29** (see below in this
+same STATUS block for the reasoning) — `config.yaml`'s `search.titles` grew
+from 9 generic guesses to 17 skill-cluster-derived titles, `filters
+.title_keywords` grew to match (12 entries), and a new `sources
+/serpapi_jobs.py` (Google Jobs via SerpApi, gated behind `SERPAPI_KEY` +
+`serpapi.enabled: true`) covers Naukri/LinkedIn/Indeed indirectly through
+Google's job index. SerpApi quota is tracked in `data/serpapi_usage.json`
+(committed back by the workflow, same as `seen_jobs.json`) so the monthly
+250-search free-tier cap persists across daily Actions runs instead of
+resetting on every fresh checkout. `serpapi.max_pages_per_title: 2` (20
+results/title across the 5-title `search.serpapi_titles` subset) runs
+~300 calls/month against that 250 cap — a deliberate choice Mehul made
+knowing it exceeds the free tier some months; the `quota_buffer` guard stops
+calling early and logs it rather than erroring, so this fails safe (fewer
+results late in the month), not broken.
 
 **✅ RESOLVED 2026-07-29 — all 5 GitHub Actions secrets now set and verified
 working.** Mehul added `GEMINI_API_KEY`/`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`

@@ -27,7 +27,7 @@ import tracker
 from cv_parser import parse_cv, keyword_set
 from cv_structure import parse_cv_structured
 from sources import (adzuna, ashby, greenhouse, job_alert_email, lever,
-                     smartrecruiters, workday)
+                     serpapi_jobs, smartrecruiters, workday)
 
 
 def _safe(s: str) -> str:
@@ -66,7 +66,7 @@ def main():
     log("== 2/4 SEARCH: pulling live listings")
     jobs = []
     for module in (adzuna, workday, greenhouse, lever, smartrecruiters, ashby,
-                   job_alert_email):
+                   job_alert_email, serpapi_jobs):
         try:
             jobs.extend(module.fetch(config, log=log))
         except Exception as e:  # a whole-source failure must not kill the run
