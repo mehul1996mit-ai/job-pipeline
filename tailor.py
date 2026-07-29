@@ -113,24 +113,37 @@ def _call_gemini(prompt: str, model: str) -> str:
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise RuntimeError("GEMINI_API_KEY not set")
-    r = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent",
-        headers={"x-goog-api-key": key},  # header, not URL: keeps the key out of error messages/CI logs
-        json={"contents": [{"parts": [{"text": prompt}]}],
-              # thinkingBudget: 0 stops "thinking" models from spending the
-              # whole output-token budget on hidden reasoning and returning
-              # no visible text (observed on gemini-flash-latest).
-              "generationConfig": {"temperature": 0.3,
-                                   "maxOutputTokens": 1536,
-                                   "thinkingConfig": {"thinkingBudget": 0}}},
-        timeout=60)
-    r.raise_for_status()
-    candidates = r.json().get("candidates", [])
-    if not candidates:
-        return ""
-    parts = candidates[0].get("content", {}).get("parts", [])
-    return "".join(p.get("text", "") for p in parts)
+
+    def post(gen_cfg):
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent",
+            headers={"x-goog-api-key": key},  # header, not URL: keeps the key out of error messages/CI logs
+            json={"contents": [{"parts": [{"text": prompt}]}],
+                  "generationConfig": gen_cfg},
+            timeout=60)
+        r.raise_for_status()
+        candidates = r.json().get("candidates", [])
+        if not candidates:
+            return ""
+        parts = candidates[0].get("content", {}).get("parts", [])
+        return "".join(p.get("text", "") for p in parts)
+
+    base_cfg = {"temperature": 0.3, "maxOutputTokens": 1536}
+    text = post(base_cfg)
+    if text:
+        return text
+    # Empty visible text with no request error can mean a "thinking" model
+    # spent the whole output budget on hidden reasoning -- the failure mode
+    # thinkingConfig was originally added to fix. It is NOT sent by default,
+    # though: verified live 2026-07-29 that whatever this alias currently
+    # resolves to (gemini-3.5-flash-lite) instead REJECTS the field outright
+    # with 400 INVALID_ARGUMENT, which silently zeroed every tailoring call
+    # for an unknown stretch (masked by the outer 429/503-only retry treating
+    # it as a plain failure). Google rotates "-latest" aliases over time, so
+    # only retry WITH it on actual evidence (empty text), never assume either
+    # direction is safe without a live call — see CLAUDE.md.
+    return post({**base_cfg, "thinkingConfig": {"thinkingBudget": 0}})
 
 
 def _call_groq(prompt: str, model: str) -> str:
