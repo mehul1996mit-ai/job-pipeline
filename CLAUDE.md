@@ -6,28 +6,39 @@ current status; `README.md` has full architecture/setup detail and
 
 ## STATUS (last updated 2026-07-28)
 
-**🚨 OPEN — action needed from Mehul, check this first:** as of the last
-verified run (`30386095721`, 2026-07-28), **GitHub Actions has ONLY
-`ADZUNA_APP_ID`/`ADZUNA_APP_KEY` set.** `GEMINI_API_KEY`, `GROQ_API_KEY`,
-`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` are **all
-missing** (`gh secret list` shows only the two Adzuna secrets; the run log
-confirms every other one blank). Confirmed impact, straight from that run's
-log:
-```
-tailor: gemini call failed for 'Product Manager' (GEMINI_API_KEY not set)
-   ... (repeats for every job)
-telegram: token/chat id not set — skipping digest
-```
-**The daily cloud pipeline has never sent a Telegram digest and has never
-tailored a single resume** — every run has silently produced a bare,
-untailored CSV. This is a bigger deal than the Adzuna bug it was found
-alongside. I can't fix this myself (entering API keys into GitHub/Streamlit
-secrets is on my hard-prohibited list, no exception even on request — this
-was tested and declined this session). Mehul needs to add the remaining 3
-secrets himself the same way he added the Adzuna ones (`gh secret set NAME
---repo mehul1996mit-ai/job-pipeline --body "value"`, run from his own
-terminal). **Also unverified: Streamlit Cloud's copy of all 5 secrets** —
-check that too, it's a separate store.
+**✅ RESOLVED 2026-07-29 — all 5 GitHub Actions secrets now set and verified
+working.** Mehul added `GEMINI_API_KEY`/`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`
+the same way he'd added Adzuna (`gh secret set NAME --repo
+mehul1996mit-ai/job-pipeline --body "value"`, from his own terminal — never
+by me; entering API keys into any field is hard-prohibited, tested and
+declined twice this session even on direct request). All three had the SAME
+angle-bracket corruption as Adzuna (`<value>` instead of `value`) — same fix,
+`setx` with brackets stripped. Verified via `gh secret list` (5/5 present)
+and a live run (`30442980079`) showing all five load (`***` masked) and
+Adzuna pulling 893 listings. **Still unverified: Streamlit Cloud's separate
+copy of all 5** — check that too if the hosted dashboard's "Run now" ever
+needs them.
+
+**🐛 Second, independent bug found immediately after — also fixed
+2026-07-29:** with real secrets finally in place, tailoring started failing
+with `400 INVALID_ARGUMENT`, not "not set". Root cause, confirmed by
+bisecting the actual request against the live API: `tailor.py`'s
+`generationConfig.thinkingConfig` field (added historically to stop a
+"thinking" model from burning its whole output budget on hidden reasoning)
+is now REJECTED outright by whatever `gemini-flash-lite-latest` currently
+resolves to (`gemini-3.5-flash-lite` — confirmed via the API's own
+`modelVersion` field). So even with a correct key, **every tailoring call
+was failing silently** (the existing 429/503-only retry logic treated the 400
+as a plain, final failure). Fixed in `tailor.py::_call_gemini`: don't send
+`thinkingConfig` by default; only retry WITH it if the base call returns
+genuinely empty text (the actual symptom it was meant to fix) — self-healing
+in either direction rather than assuming today's model behavior is permanent,
+since Google rotates `-latest` aliases over time. Verified end-to-end with a
+real `tailor_job()` call: real `tailored_summary`, real `honest_gap_note`,
+real `jd_analysis`, all grounded in the CV. **If tailoring ever silently
+breaks again, bisect the actual request against the live API first** (see
+this session's method) rather than assuming it's a credentials issue — it
+looked exactly like one until the key started working.
 
 **Adzuna — root cause found and fixed 2026-07-28.** Two independent bugs, both
 now fixed and confirmed live:
