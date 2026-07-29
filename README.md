@@ -213,7 +213,7 @@ portal, always.
 
 ### 2. Gemini key (free)
 1. Go to https://aistudio.google.com/apikey → "Create API key".
-2. Free tier comfortably covers 25 tailoring calls/day on `gemini-2.0-flash`.
+2. Free tier comfortably covers 50 tailoring calls/day on `gemini-2.0-flash`.
    (Alternative: Groq — free key at https://console.groq.com/keys, then set
    `tailor.provider: groq` in `config.yaml`.)
 
@@ -230,7 +230,17 @@ portal, always.
    - `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`
    - `GEMINI_API_KEY` (and/or `GROQ_API_KEY` / `ANTHROPIC_API_KEY`)
    - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
-   Unset secrets are skipped gracefully — the pipeline still runs.
+   Unset secrets are skipped gracefully — the pipeline still runs, quietly
+   missing whatever that secret powers.
+3. **Verify, don't assume.** "I added it in the UI" and "the workflow can
+   actually read it" are different claims — a secret can look saved and still
+   never reach the job (wrong name, wrong repo, saved to an environment the
+   workflow doesn't use). After adding secrets, trigger a run
+   (`gh workflow run daily_job_scan.yml`) and grep its log for each one:
+   `gh run view <id> --log | grep -i "not set\|call failed\|skipping"`.
+   A secret that "should be set" but shows up blank in that grep isn't set,
+   full stop — this exact gap (Gemini + Telegram silently missing for
+   an unknown stretch while Adzuna alone got fixed) is why this line exists.
 
 ### 5. Resume placement
 Put your resume at the repo root as **`base_cv.pdf`**. Replace it any time —
@@ -243,8 +253,9 @@ Everything lives in `config.yaml`:
 - `filters.title_keywords` — allowlist; a listing needs one in its title.
 - `filters.cities` — allowlist (empty = all cities); "remote" always passes.
 - `filters.min_salary_annual` — enforced ONLY when a listing reports salary.
-- `filters.min_score_to_tailor` — jobs below this score (default 55) stay
-  in the CSV/digest but don't get a tailored resume.
+- `filters.min_score_to_tailor` — jobs below this score (default 50, using the
+  structured score — see "Fit scoring" above) stay in the CSV/digest but don't
+  get a tailored resume.
 - `filters.remote_only` — `true` drops all on-site/hybrid listings.
 - `profile.experience_years` — drives the experience-band overlap check.
 - `scoring.domain_keywords` — bonus points only, never a filter.

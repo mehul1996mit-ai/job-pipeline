@@ -4,7 +4,57 @@ Read this file first in any new session on this project. It has the
 current status; `README.md` has full architecture/setup detail and
 `GCC_COVERAGE_GUIDE.md` has the manual-application layer.
 
-## STATUS (last updated 2026-07-27)
+## STATUS (last updated 2026-07-28)
+
+**🚨 OPEN — action needed from Mehul, check this first:** as of the last
+verified run (`30386095721`, 2026-07-28), **GitHub Actions has ONLY
+`ADZUNA_APP_ID`/`ADZUNA_APP_KEY` set.** `GEMINI_API_KEY`, `GROQ_API_KEY`,
+`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` are **all
+missing** (`gh secret list` shows only the two Adzuna secrets; the run log
+confirms every other one blank). Confirmed impact, straight from that run's
+log:
+```
+tailor: gemini call failed for 'Product Manager' (GEMINI_API_KEY not set)
+   ... (repeats for every job)
+telegram: token/chat id not set — skipping digest
+```
+**The daily cloud pipeline has never sent a Telegram digest and has never
+tailored a single resume** — every run has silently produced a bare,
+untailored CSV. This is a bigger deal than the Adzuna bug it was found
+alongside. I can't fix this myself (entering API keys into GitHub/Streamlit
+secrets is on my hard-prohibited list, no exception even on request — this
+was tested and declined this session). Mehul needs to add the remaining 3
+secrets himself the same way he added the Adzuna ones (`gh secret set NAME
+--repo mehul1996mit-ai/job-pipeline --body "value"`, run from his own
+terminal). **Also unverified: Streamlit Cloud's copy of all 5 secrets** —
+check that too, it's a separate store.
+
+**Adzuna — root cause found and fixed 2026-07-28.** Two independent bugs, both
+now fixed and confirmed live:
+1. Local Windows env vars had the value literally wrapped in angle brackets
+   (`<195aa6d0>` instead of `195aa6d0`) — a copy-paste artifact. Every local
+   call 401'd. Fixed via `setx` with the brackets stripped.
+2. GitHub Actions secrets for Adzuna were **completely empty** (not
+   malformed — never set). Mehul added them via `gh secret set`.
+Verified via a live triggered run (`30386095721`): Adzuna went from "not
+set — skipping" to **888 listings**, pushing total raw listings across all
+sources to 3,672 → 302 after filters → 287 genuinely new in one day. This is
+almost certainly the real reason job volume looked thin for weeks — Adzuna is
+the broad multi-portal aggregator this pipeline is built around, and it
+had been contributing zero jobs, cloud-side, since setup.
+
+**`tailor.top_n` and `digest.top_n` raised 25/15 → 50/50 (2026-07-28)**,
+directly because of the volume jump above — 25 tailored/day was covering
+under 10% of a 287-job day. Both slice the SAME score-sorted `new_jobs` list
+in `main.py` (`new_jobs.sort(key=lambda j: j["score"], reverse=True)` runs
+before either cut), so "top 50 tailored" and "top 50 in the digest" are the
+identical 50 jobs — selection is by structured match score against the CV, as
+requested. Measured cost before raising: 25 tailored jobs took 76s with zero
+429/503 retries in the 2026-07-28 run; 50 should land ~2.5 min, far under the
+30-min workflow timeout. Gemini's exact free-tier quota isn't verifiable from
+here — this was a measured-safe increase, not a maxed-out one. Watch for
+"tailor: gemini 429/503" retry lines before raising further. (Moot until the
+GEMINI_API_KEY gap above is closed — right now 0 of the 50 succeed.)
 
 **What this is:** A daily, automated job-search pipeline for Mehul —
 Product Manager, 4+ yrs digital lending/fintech (Bajaj Finance, Pune).
@@ -236,9 +286,10 @@ a scorer that doesn't separate is rearranging deck chairs.
 | `notify.py` | Telegram digest |
 | `tracker.py` | Follow-up nudges + weekly stats |
 | `streamlit_app.py` | Dashboard: review queue, run now, edit filters |
-| `smoke_test.py` | 58 offline checks — run before trusting any change |
+| `smoke_test.py` | 127 offline checks — run before trusting any change |
 | `GCC_COVERAGE_GUIDE.md` | Manual layer: protected-portal email alerts + weekly Naukri/iimjobs routine |
 
 Full architecture, setup instructions, and the complete feature list are
 in `README.md`. Run `python smoke_test.py` after any code change —
-it needs no API keys or network access.
+it needs no API keys or network access. (`scratch_*.py` files if you ever see
+one are one-off verification scripts — delete after use, never commit.)
