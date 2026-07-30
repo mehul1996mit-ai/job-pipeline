@@ -25,16 +25,10 @@ COLUMNS = ["applied", "applied_on", "match_feedback", "score", "title",
            "missing_keywords", "description_snippet"]
 
 
-def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"job_queue_{date.today().isoformat()}.csv"
-    with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction="ignore")
-        w.writeheader()
-        for j in jobs:
-            t = j.get("tailored", {}) or {}
-            fit = t.get("fit_analysis") or {}
-            w.writerow({
+def _row_for(j: dict) -> dict:
+    t = j.get("tailored", {}) or {}
+    fit = t.get("fit_analysis") or {}
+    return ({
                 "applied": "no",
                 "applied_on": "",
                 # Your good/partial/no relevance label. Blank until you set it
@@ -98,4 +92,35 @@ def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
                 "description_snippet":
                     (j.get("description") or "")[:2000],
             })
+
+
+def write_queue(jobs: list, out_dir: Path = Path("data")) -> Path:
+    """Append today's new jobs to data/job_queue_YYYY-MM-DD.csv.
+
+    A same-day re-run (e.g. manually re-triggering the workflow to verify a
+    fix) must not overwrite an earlier run's real results -- existing rows
+    (including any applied/match_feedback edits made in the dashboard) are
+    read back and kept as-is; only jobs whose URL isn't already in the file
+    are appended. `jobs` is expected to already be new-vs-seen-store, so this
+    de-dupe is belt-and-suspenders, not the primary defense.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"job_queue_{date.today().isoformat()}.csv"
+
+    existing_rows, existing_urls = [], set()
+    if path.exists():
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                existing_rows.append(row)
+                if row.get("url"):
+                    existing_urls.add(row["url"])
+
+    new_rows = [_row_for(j) for j in jobs if j.get("url") not in existing_urls]
+    all_rows = existing_rows + new_rows
+    all_rows.sort(key=lambda r: float(r.get("score") or 0), reverse=True)
+
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(all_rows)
     return path
