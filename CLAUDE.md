@@ -4,7 +4,23 @@ Read this file first in any new session on this project. It has the
 current status; `README.md` has full architecture/setup detail and
 `GCC_COVERAGE_GUIDE.md` has the manual-application layer.
 
-## STATUS (last updated 2026-07-29)
+## STATUS (last updated 2026-07-30)
+
+**🐛 Bug found and fixed 2026-07-30 — SerpApi silently skipped its first
+scheduled run.** The 2026-07-30 08:30 IST run completed successfully (61 new
+jobs, 23 tailored, seen-store/commit-back all fine) but logged `serpapi:
+SERPAPI_KEY not set — skipping` even though the secret existed in `gh secret
+list`. Root cause: when `sources/serpapi_jobs.py` and the `SERPAPI_KEY`
+secret were added 2026-07-29, the workflow's commit-back step was updated to
+handle `data/serpapi_usage.json`, but the `env:` block that actually feeds
+`python main.py` (`.github/workflows/daily_job_scan.yml`) was never given a
+`SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}` line — same class of gap as the
+Adzuna/Gemini/Telegram secret issues found earlier in the week, different
+mechanism (missing wiring, not a corrupted value). Fixed same day. **If any
+newly-added source/secret ever "isn't set" in a live run despite `gh secret
+list` showing it, check the workflow's `env:` block before assuming the
+secret itself is bad** — this is the second distinct way a correctly-set
+secret has failed to reach the running script.
 
 **⚠️ Read before judging any volume/yield number from 2026-07-29.** `main.py`
 was run FOUR times that day (env-var debugging, then testing the new title
