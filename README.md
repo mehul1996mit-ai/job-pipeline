@@ -22,7 +22,7 @@ auto-submission should be declined with a pointer to this section.
 | Stage | Module(s) | What happens |
 |---|---|---|
 | 1. PARSE | `cv_parser.py` | `base_cv.pdf` → raw text, summary/skills/experience sections, every bullet, keyword set. Matching always uses the full CV text. |
-| 2. SEARCH | `sources/adzuna.py`, `sources/workday.py`, `sources/greenhouse.py`, `sources/lever.py` | Adzuna aggregator (broad titles, ALL industries) + Workday CXS feeds for 9 employers (Citi, Deutsche Bank, Wells Fargo, Mastercard, PayPal, State Street, BlackRock, Adobe, Salesforce — all probed and confirmed publicly open) + Greenhouse & Lever (empty token lists — add confirmed companies). Cross-source duplicates keep the DIRECT employer-ATS link over aggregator redirects. All normalized to one schema. |
+| 2. SEARCH | `sources/adzuna.py`, `sources/workday.py`, `sources/greenhouse.py`, `sources/lever.py`, `sources/smartrecruiters.py`, `sources/ashby.py`, `sources/job_alert_email.py`, `sources/serpapi_jobs.py` | Adzuna aggregator (skill-cluster-derived titles, ALL industries — see "Editing filters & targets") + Workday CXS feeds for 9 employers (Citi, Deutsche Bank, Wells Fargo, Mastercard, PayPal, State Street, BlackRock, Adobe, Salesforce) + Greenhouse/Lever/SmartRecruiters (verified India-posting tokens) + Ashby (empty — none of ~40 checked companies had an India posting yet) + read-only IMAP ingest of Naukri/LinkedIn/Indeed job-alert emails (off by default) + SerpApi Google Jobs (paid tier, off by default — see "Job sources" below). Cross-source duplicates keep the DIRECT employer-ATS link over aggregator redirects. All normalized to one schema. |
 | 3. MATCH & SCORE | `matcher.py`, `dedupe.py`, `cv_structure.py`, `scoring_core.py`, `skill_match.py`, `aggregate.py`, `calibrate.py`, `jd_analyst.py` | Config-driven filters (title / city / experience band / optional salary floor), then a three-layer **deterministic** fit score (see below), cross-source dedupe, persistent seen-store so each run reports only NEW jobs. Full JDs fetched for the top 8 Workday matches only. |
 | 4. TAILOR & DELIVER | `tailor.py`, `resume_render.py`, `report.py`, `notify.py` | Free-tier LLM (gemini default / groq / anthropic) returns strict JSON: tailored summary, lead bullets, **JD-vocabulary bullet rewrites**, truthful keywords, honest gap note — **never invents experience**. `tailor.build_tailored_resume()` applies: bullet reorder, validated rewording (every rewrite must keep all numbers/metrics identical and stay in a sane length band, else the original wording is kept), skill-group reorder, and skill-item reorder toward JD mentions. Only jobs scoring ≥ `filters.min_score_to_tailor` get tailored — weak fits stay visible in the CSV but don't get a resume. Renders per-job **DOCX + PDF** under `data/resumes/<date>/<company>_<title>/`, writes `data/job_queue_YYYY-MM-DD.csv`, and sends a Telegram digest. |
 
@@ -140,6 +140,18 @@ App passwords; never your account password) → set `JOB_ALERT_EMAIL` and
 listings score on title alone and rank below fully-described ones — expected,
 not a defect.
 
+**SerpApi Google Jobs (`sources/serpapi_jobs.py`) — the paid route to the same
+portals, added 2026-07-29.** Google's own job index surfaces postings from
+sites (including Naukri/LinkedIn/Indeed) that implement `JobPosting`
+structured data — real coverage, but only what Google has indexed, not a full
+mirror of those portals. Off by default: set `SERPAPI_KEY` and
+`serpapi.enabled: true`. Free tier is 250 searches/month; `search
+.serpapi_titles` is a deliberately narrower subset of the main title list to
+fit that budget, and `data/serpapi_usage.json` (committed back by the daily
+workflow) tracks monthly usage so a debug session re-running `main.py`
+repeatedly can't silently blow the quota — the `serpapi.quota_buffer` guard
+stops calling early and logs it rather than erroring once near the cap.
+
 ## Follow-ups & weekly stats (`tracker.py`)
 
 - **Follow-up nudges (daily):** any job you've marked `applied = yes` that
@@ -167,12 +179,18 @@ not a defect.
 - **Filters** — edit title keywords, cities, salary floor, fit-score floor,
   experience years, and tailor count; saves `config.yaml`.
 
-Run locally: `streamlit run streamlit_app.py`
+Run locally: `streamlit run streamlit_app.py`. On Windows, a Task Scheduler
+job (`JobPipelineDashboardWatchdog`, added 2026-07-31) runs
+`dashboard_watchdog.ps1` every 5 minutes and restarts it on port 8502 if it
+isn't listening — a plain backgrounded process kept dying unpredictably
+between terminal sessions, and the watchdog is independent of any particular
+session staying open. It only runs while you're logged into Windows; the
+hosted dashboard below doesn't have that limitation.
 
 Host free: [share.streamlit.io](https://share.streamlit.io) → New app →
 this repo / `main` / `streamlit_app.py` (works with private repos via the
-GitHub authorization). Add the same five keys under **App settings →
-Secrets**:
+GitHub authorization). Add the same keys under **App settings → Secrets**
+(SerpApi optional — only needed if `serpapi.enabled: true`):
 
 ```toml
 ADZUNA_APP_ID = "..."
@@ -180,6 +198,7 @@ ADZUNA_APP_KEY = "..."
 GEMINI_API_KEY = "..."
 TELEGRAM_BOT_TOKEN = "..."
 TELEGRAM_CHAT_ID = "..."
+SERPAPI_KEY = "..."
 ```
 
 Because the daily GitHub Actions run commits each day's queue CSV back to
@@ -224,32 +243,54 @@ portal, always.
 3. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser and
    copy `"chat":{"id": <number>}` — that number is your **chat id**.
 
-### 4. GitHub repository + secrets
+### 4. SerpApi key (optional, free tier — Naukri/LinkedIn/Indeed coverage)
+1. Register at https://serpapi.com → dashboard → copy the API key.
+2. Free tier is 250 searches/month — see `search.serpapi_titles` and
+   `serpapi.*` in `config.yaml` for how usage is kept within that budget.
+3. Set `SERPAPI_KEY` and flip `serpapi.enabled: true`.
+
+### 5. GitHub repository + secrets
 1. Push this repo to GitHub (private is fine).
 2. Repo → Settings → Secrets and variables → Actions → add:
    - `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`
    - `GEMINI_API_KEY` (and/or `GROQ_API_KEY` / `ANTHROPIC_API_KEY`)
    - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+   - `SERPAPI_KEY` (optional)
    Unset secrets are skipped gracefully — the pipeline still runs, quietly
    missing whatever that secret powers.
-3. **Verify, don't assume.** "I added it in the UI" and "the workflow can
+3. **Adding the secret is not the same as wiring it.** A secret existing in
+   `gh secret list` only reaches the script if it's also listed in the
+   workflow's `env:` block under the "Run pipeline" step
+   (`.github/workflows/daily_job_scan.yml`) — a real bug on 2026-07-30 was
+   exactly this: `SERPAPI_KEY` was added to the repo and to the commit-back
+   step, but missing from that `env:` block, so the run reported "not set"
+   despite the secret existing. Check both places when adding any new secret.
+4. **Verify, don't assume.** "I added it in the UI" and "the workflow can
    actually read it" are different claims — a secret can look saved and still
    never reach the job (wrong name, wrong repo, saved to an environment the
-   workflow doesn't use). After adding secrets, trigger a run
-   (`gh workflow run daily_job_scan.yml`) and grep its log for each one:
+   workflow doesn't use, or missing from `env:` per the point above). After
+   adding secrets, trigger a run (`gh workflow run daily_job_scan.yml`) and
+   grep its log for each one:
    `gh run view <id> --log | grep -i "not set\|call failed\|skipping"`.
    A secret that "should be set" but shows up blank in that grep isn't set,
    full stop — this exact gap (Gemini + Telegram silently missing for
    an unknown stretch while Adzuna alone got fixed) is why this line exists.
 
-### 5. Resume placement
+### 6. Resume placement
 Put your resume at the repo root as **`base_cv.pdf`**. Replace it any time —
 the next run re-parses it.
 
 ## Editing filters & targets
 
 Everything lives in `config.yaml`:
-- `search.titles` — the broad queries sent to Adzuna (keep them generic).
+- `search.titles` — queries sent to Adzuna/Workday. As of 2026-07-29 these are
+  skill-cluster-derived (each title maps to a capability actually evidenced in
+  `resume_master.json`, not a guess — see CLAUDE.md for the full mapping), not
+  generic PM/BA guesses. Adding a title here does nothing unless it (or a
+  substring) is also in `filters.title_keywords` below — that's what actually
+  lets a listing through.
+- `search.serpapi_titles` — a narrower subset used only by
+  `sources/serpapi_jobs.py`, sized to fit the free tier's 250 searches/month.
 - `filters.title_keywords` — allowlist; a listing needs one in its title.
 - `filters.cities` — allowlist (empty = all cities); "remote" always passes.
 - `filters.min_salary_annual` — enforced ONLY when a listing reports salary.

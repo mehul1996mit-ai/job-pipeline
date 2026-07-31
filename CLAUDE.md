@@ -4,7 +4,46 @@ Read this file first in any new session on this project. It has the
 current status; `README.md` has full architecture/setup detail and
 `GCC_COVERAGE_GUIDE.md` has the manual-application layer.
 
-## STATUS (last updated 2026-07-30)
+## STATUS (last updated 2026-07-31)
+
+**✅ Session wrap-up 2026-07-31 — SerpApi confirmed live in production,
+dashboard watchdog added, queue-overwrite bug fixed.** Three things closed
+out this session, in order:
+1. **SerpApi confirmed working end-to-end** in the actual GitHub Actions
+   environment (not just locally) via a manual `gh workflow run` trigger —
+   log showed `serpapi: 99 listings (15/250 calls used this month)`, quota
+   tracker persisting correctly across runs via the committed
+   `data/serpapi_usage.json`.
+2. **Local Streamlit dashboard (localhost:8502) kept dying between chat
+   turns** because it was only ever started as a background process tied to
+   the current session — not a real "always on" mechanism. Fixed with a
+   Windows Task Scheduler job (`JobPipelineDashboardWatchdog`, runs
+   `dashboard_watchdog.ps1` every 5 min, checks port 8502, restarts if down).
+   Verified live: killed the process, triggered the task, it came back within
+   seconds. Caveat: only runs while logged into Windows (the `on-logon`
+   trigger hit a UAC deny-only restriction in this shell and couldn't be
+   registered — the 5-min recurring trigger covers the gap with up to a
+   5-minute delay after boot/login). For a dependency-free "always up," the
+   hosted dashboard (https://job-1357.streamlit.app/) remains the better fit.
+3. **`report.write_queue()` was overwriting, not appending, same-day runs** —
+   discovered when a manual re-trigger (to verify #1) silently destroyed the
+   morning's real 61-job queue, leaving only that afternoon's incremental 15.
+   Fixed: it now reads back existing rows (preserving any `applied`/
+   `match_feedback` edits already made in the dashboard) and only appends
+   genuinely new URLs, re-sorting by score. Verified with a scripted
+   run-edit-run-again test before committing. **This morning's 61 clobbered
+   jobs are not recoverable from the CSV** (they were still tailored, sent in
+   the Telegram digest, and sit in that run's GitHub Actions artifact) — going
+   forward, same-day re-triggers append instead of destroy.
+
+**Baseline note:** 2026-07-31's scheduled run (`30627617285`) was the first
+run all week with exactly one execution that day — 24 new jobs. Don't read
+that as a volume drop: the seen-store sat at 652 entries by then, saturated
+from this week's repeated testing (four runs 07-29, two runs 07-30), so most
+of that day's ~500 filtered matches were already-seen postings, not evidence
+of fewer real listings. Raw source counts (Adzuna 1650, Greenhouse 2350,
+SerpApi 99, etc.) were consistent with every other run this week. Treat
+2026-08-01 onward as the first clean baseline for judging daily volume.
 
 **🐛 Bug found and fixed 2026-07-30 — SerpApi silently skipped its first
 scheduled run.** The 2026-07-30 08:30 IST run completed successfully (61 new
@@ -137,15 +176,28 @@ look there first.
 
 **Dashboard:**
 - Local: `streamlit_app.py`, normally run at `http://localhost:8502`.
-  It's a background process started via `Start-Process` and it dies
-  unpredictably between chat turns (confirmed via clean logs each time —
-  not a code bug, just how backgrounded Windows processes behave in this
-  environment). Restart with:
-  ```powershell
-  cd C:\Claude\job_pipeline
-  Start-Process -FilePath "C:\Users\User\AppData\Local\Programs\Python\Python312\python.exe" -ArgumentList "-m","streamlit","run","streamlit_app.py","--server.headless","true","--server.port","8502" -WindowStyle Hidden -RedirectStandardOutput "streamlit_out.log" -RedirectStandardError "streamlit_err.log"
-  ```
-  Then verify with `Get-NetTCPConnection -LocalPort 8502 -State Listen`.
+  **Fixed 2026-07-31**: it used to die unpredictably between chat turns
+  because it was only ever started as a background process tied to whatever
+  session launched it — not a real "always on" mechanism. A Windows Task
+  Scheduler job (`JobPipelineDashboardWatchdog`) now runs
+  `dashboard_watchdog.ps1` every 5 minutes, checking port 8502 and restarting
+  Streamlit if it's down. Verified live (killed the process, triggered the
+  task, it came back in seconds). If it's ever down for longer than 5
+  minutes, check the task itself: `Get-ScheduledTask -TaskName
+  JobPipelineDashboardWatchdog` should show `State: Ready`; `Start-
+  ScheduledTask -TaskName JobPipelineDashboardWatchdog` runs it immediately.
+  Caveat: this only runs while logged into Windows — the `on-logon` trigger
+  couldn't be registered (UAC deny-only restriction in this shell), so after
+  a fresh boot/login there can be up to a 5-minute gap before the recurring
+  trigger catches it.
+- **Hosted (Streamlit Community Cloud): confirmed live as of 2026-07-27**
+  at **https://job-1357.streamlit.app/** — use this as the primary
+  dashboard link instead of localhost, especially when you need a guarantee
+  independent of this machine being on/logged in. Verified via the apps list
+  at share.streamlit.io (app `job-pipeline · main · streamlit_app.py`,
+  public/no error badge); direct in-page verification was blocked by a
+  browser-extension domain permission, so if data looks stale there,
+  open it manually to double check.
 - **Hosted (Streamlit Community Cloud): confirmed live as of 2026-07-27**
   at **https://job-1357.streamlit.app/** — use this as the primary
   dashboard link instead of localhost. Verified via the apps list at
@@ -154,10 +206,12 @@ look there first.
   browser-extension domain permission, so if data looks stale there,
   open it manually to double check.
 
-**Secrets (5 required):** `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`,
-`GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Live in three
-places only — GitHub Actions repo secrets, Streamlit Cloud app secrets,
-and Mehul's local Windows user env vars (`setx`). **Never in source files
+**Secrets (5 required + 1 optional):** `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`,
+`GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, plus
+`SERPAPI_KEY` (optional — only needed if `serpapi.enabled: true`; set and
+verified working 2026-07-29/30). Live in three places only — GitHub Actions
+repo secrets, Streamlit Cloud app secrets, and Mehul's local Windows user
+env vars (`setx`). **Never in source files
 or committed anywhere.** Code always reads via `os.environ.get("NAME")`.
 
 **Key rotation — decided against, 2026-07-27:** these 5 keys were pasted
@@ -255,10 +309,12 @@ permanent maintenance tax on an unattended pipeline. Instead:
 - `sources/smartrecruiters.py`, `sources/ashby.py` — public no-auth ATS feeds,
   joining Workday/Greenhouse/Lever. Token/board lists ship EMPTY; add only
   confirmed ones.
-- Declined and not built: any direct Naukri/LinkedIn/Indeed scraper. Offered
-  but not taken up: SerpApi Google Jobs (paid, legitimately indexes those
-  portals). If Mehul asks again, this is the tradeoff to re-present — don't
-  just build the scraper.
+- Declined and never build: any direct Naukri/LinkedIn/Indeed scraper — the
+  reasoning above stands regardless of what else changes.
+- `sources/serpapi_jobs.py` — **built 2026-07-29, confirmed live 2026-07-30.**
+  SerpApi Google Jobs (paid tier, off by default) was offered as the
+  legitimate-indexing alternative and Mehul took it up. See "Job sources" in
+  README.md and the STATUS entries above for setup and quota details.
 
 **`greenhouse.tokens`/`lever.tokens`/`smartrecruiters.companies` populated
 2026-07-28** with 10 verified tokens (Razorpay, Stripe, Coinbase, Databricks,
@@ -330,6 +386,8 @@ a scorer that doesn't separate is rearranging deck chairs.
 | `jd_analyst.py` | JD requirement extraction (deterministic + LLM merge) |
 | `sources/{adzuna,workday,greenhouse,lever,smartrecruiters,ashby}.py` | Job sources, normalized schema |
 | `sources/job_alert_email.py` | Read-only IMAP ingest of Naukri/LinkedIn/Indeed alert emails |
+| `sources/serpapi_jobs.py` | Google Jobs via SerpApi — paid-tier Naukri/LinkedIn/Indeed coverage, off by default, quota-tracked in `data/serpapi_usage.json` |
+| `dashboard_watchdog.ps1` | Restarts local Streamlit (port 8502) if down; run every 5 min by the `JobPipelineDashboardWatchdog` Windows Task Scheduler job |
 | `feedback.py` | good/partial/no labels → proposed search + weight changes |
 | `matcher.py` | Filters + ATS scoring + missing-keyword extraction |
 | `dedupe.py` | Cross-source dedupe (direct ATS beats aggregator) + seen-store |
