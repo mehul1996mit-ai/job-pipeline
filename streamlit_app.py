@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 
 import pandas as pd
@@ -47,8 +48,45 @@ def secret_or_env(name):
     return os.environ.get(name, "")
 
 
-tab_queue, tab_learn, tab_run, tab_filters = st.tabs(
-    ["📋 Review queue", "🧠 Learning", "🚀 Run now", "⚙️ Filters"])
+def apply_bridge_markdown(url: str, config: dict) -> str:
+    """Markdown for the semi-assisted-apply link: opens `url` with a
+    ?jtApply=1 marker the CV Match Copilot extension's content script
+    notices (see config.yaml's apply_bridge comment) and an honest badge
+    saying what "Apply" here actually does: auto-fill directly, hop through
+    Adzuna to the real employer page first (2026-08-01: the extension
+    auto-clicks Adzuna's own "apply-capture-skip" link, then auto-fills
+    there if THAT host is covered), or just open the posting like a plain
+    link.
+    """
+    bridge = (config or {}).get("apply_bridge") or {}
+    if not bridge.get("enabled", True):
+        return f"[Open job posting]({url})"
+    sep = "&" if "?" in url else "?"
+    apply_url = f"{url}{sep}jtApply=1"
+    host = urllib.parse.urlparse(url).netloc.lower()
+    autofill_hosts = bridge.get("autofill_hosts") or []
+    covered = any(host == h or host.endswith("." + h) for h in autofill_hosts)
+    is_adzuna = host.endswith("adzuna.in") or host.endswith("adzuna.com") \
+        or host.endswith("adzuna.co.in")
+    if covered:
+        badge = " — 🤖 extension will auto-fill on this host"
+    elif is_adzuna:
+        badge = (" — 🤖 extension will follow through to the real employer "
+                  "page first, then auto-fill there if that host is covered")
+    else:
+        badge = " — opens only; this host isn't in the extension's autofill list yet"
+    return f"[Open job posting]({url})  ·  [**Apply →**]({apply_url}){badge}"
+
+
+# CV Match Copilot (Gemini)'s Chrome extension ID — needed to reach its
+# externally_connectable listener (background.js's jt.queryTracker handler,
+# added 2026-08-02) from this page's own JS. It's the extension's real
+# chrome://extensions ID for this dev/unpacked install, not a store slug —
+# re-check it here if the extension is ever reinstalled or repackaged.
+EXTENSION_ID = "ngokbgjnigblebajkjihiapolkpllhki"
+
+tab_queue, tab_status, tab_learn, tab_run, tab_filters = st.tabs(
+    ["📋 Review queue", "🧭 Status", "🧠 Learning", "🚀 Run now", "⚙️ Filters"])
 
 # ------------------------------------------------------------ Review queue
 with tab_queue:
@@ -167,13 +205,14 @@ with tab_queue:
         st.subheader("Tailored matches — detail & resume files")
         master = json.loads(
             (ROOT / "resume_master.json").read_text(encoding="utf-8"))
+        bridge_config = load_config()
         for _, row in tailored_df.iterrows():
             channel = row.get("apply_channel", "")
             badge = " 🎯direct-apply" if channel == "direct" else ""
             with st.expander(
                     f"⭐ {row['score']} — {row['title']} @ {row['company']} "
                     f"({row['location']}){badge}"):
-                st.markdown(f"[Open job posting]({row['url']})"
+                st.markdown(apply_bridge_markdown(row["url"], bridge_config)
                             + (" — **direct employer ATS** (preferred: no "
                                "aggregator hop)" if channel == "direct"
                                else ""))
@@ -311,6 +350,58 @@ with tab_queue:
                     st.success("Tailored and saved to the queue — "
                                "reloading...")
                     st.rerun()
+
+# ------------------------------------------------------------------- Status
+# Merges PIPELINE-side stages (found/scored/tailored — from this CSV) with
+# BROWSER-side stages (opened/tailored/filled/uncertain/submitted — live from
+# the CV Match Copilot extension's own tracker) into one per-job checklist.
+#
+# The browser-side half is read entirely client-side by static/jt_status.html
+# via chrome.runtime.sendMessage against the extension's read-only
+# jt.queryTracker listener. That file is served through Streamlit's static
+# file server (.streamlit/config.toml's enableStaticServing) rather than
+# st.components.v1.html: html() renders into a sandboxed srcdoc iframe with
+# an OPAQUE origin (verified live 2026-08-02 — allow-same-origin does not
+# fix this for srcdoc), which the extension's externally_connectable can
+# never match. A static file served at /app/static/... shares this page's
+# real origin, which does match. Python only writes the job list each
+# render; it never sees the extension's tracker data — no server round trip
+# for it, and no path for this page to WRITE anything back into the
+# extension's storage.
+with tab_status:
+    queues = sorted(glob.glob(str(DATA / "job_queue_*.csv")), reverse=True)
+    if not queues:
+        st.info("No queue CSVs yet.")
+    else:
+        status_df = pd.read_csv(queues[0], encoding="utf-8-sig",
+                                 keep_default_na=False)
+        status_tailored = status_df[status_df["tailored_summary"] != ""]
+        st.caption(f"Showing **{Path(queues[0]).stem.replace('job_queue_', '')}** "
+                   f"— {len(status_tailored)} tailored job(s). Pipeline stage "
+                   f"comes from this CSV; browser stage is read live from the "
+                   f"CV Match Copilot extension in *your* browser — it will "
+                   f"only show data if this page is open in the Chrome "
+                   f"profile that has the extension installed.")
+
+        static_dir = ROOT / "static"
+        static_dir.mkdir(exist_ok=True)
+        (static_dir / "jt_status_data.json").write_text(json.dumps({
+            "jobs": [
+                {
+                    "url": r["url"],
+                    "title": r.get("title", ""),
+                    "company": r.get("company", ""),
+                    "score": r.get("score", ""),
+                }
+                for _, r in status_tailored.iterrows()
+            ]
+        }, ensure_ascii=False), encoding="utf-8")
+
+        import streamlit.components.v1 as components
+        components.iframe(
+            src="/app/static/jt_status.html",
+            height=min(120 + 40 * max(len(status_tailored), 1), 700),
+            scrolling=True)
 
 # ----------------------------------------------------------------- Learning
 with tab_learn:

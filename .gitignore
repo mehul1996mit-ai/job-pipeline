@@ -8,3 +8,5 @@ data/_livetest/
 data/_demo/
 streamlit_out.log
 streamlit_err.log
+# Regenerated on every Status-tab render (streamlit_app.py) — not source.
+static/jt_status_data.json

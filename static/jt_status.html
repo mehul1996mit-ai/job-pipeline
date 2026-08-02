@@ -1,0 +1,183 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Job status</title>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    font-size: 13px;
+    margin: 0;
+    padding: 0;
+    color: #e6e6e6;
+    background: transparent;
+  }
+  #note { margin-bottom: 8px; opacity: 0.75; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px; vertical-align: top; }
+  thead th { border-bottom: 1px solid rgba(128,128,128,0.4); }
+  tbody tr { border-bottom: 1px solid rgba(128,128,128,0.15); }
+  a { color: inherit; }
+  .company { opacity: 0.65; }
+  .steps { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+  .step { display: flex; align-items: center; gap: 4px; white-space: nowrap; opacity: 0.4; }
+  .step.done { opacity: 1; }
+  .step.uncertain { opacity: 1; color: #d99a2b; }
+  .step .mark { font-family: monospace; width: 1em; display: inline-block; text-align: center; }
+  .step.done .mark { color: #2f9e44; }
+  .step.uncertain .mark { color: #d99a2b; }
+  .steps-sep { opacity: 0.3; padding: 0 2px; }
+  .manual-badge {
+    display: inline-block; margin-top: 4px; font-size: 11px;
+    padding: 1px 6px; border-radius: 3px; border: 1px solid rgba(128,128,128,0.5);
+  }
+  @media (prefers-color-scheme: light) {
+    body { color: #1a1a1a; }
+  }
+</style>
+</head>
+<body>
+<div id="note">Loading…</div>
+<table>
+  <thead>
+    <tr><th>Job</th><th>Score</th><th>Steps</th><th>Updated</th></tr>
+  </thead>
+  <tbody id="body"></tbody>
+</table>
+<script>
+// Same-origin static page (see .streamlit/config.toml's enableStaticServing
+// note) — this is what makes chrome.runtime.sendMessage reachable at all.
+// A components.v1.html srcdoc iframe cannot do this: its origin is opaque
+// even with allow-same-origin, so the extension's externally_connectable
+// check can never match it (verified live 2026-08-02).
+var EXTENSION_ID = "ngokbgjnigblebajkjihiapolkpllhki";
+
+// Mirrors background.js's AUTO_STAGE_RANK (cv-match-copilot-gemini repo) —
+// keep these two in sync if that ranking ever changes.
+var AUTO_STAGE_RANK = { opened: 0, tailored: 1, filled: 2, uncertain: 3, submitted: 4 };
+var MANUAL_STAGES = ["applied", "viewed", "interview", "offer", "rejected", "no_response"];
+
+// Every job shown here is already in the "tailored" queue CSV, so all three
+// pipeline steps are facts, not something to re-derive from tracker state.
+var PIPELINE_STEPS = ["Found", "Scored", "Résumé tailored"];
+var BROWSER_STEPS = [
+  { key: "opened", label: "Opened in browser" },
+  { key: "tailored", label: "Live JD tailor" },
+  { key: "filled", label: "Form filled" },
+  { key: "submitted", label: "Submitted" }
+];
+
+function fmtDate(ts) {
+  if (!ts) return "—";
+  var d = new Date(ts);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") +
+    "-" + String(d.getDate()).padStart(2, "0");
+}
+
+function stepEl(label, state) {
+  var span = document.createElement("span");
+  span.className = "step" + (state === "done" ? " done" : state === "uncertain" ? " uncertain" : "");
+  var mark = document.createElement("span");
+  mark.className = "mark";
+  mark.textContent = state === "done" ? "✓" : state === "uncertain" ? "?" : "○";
+  span.appendChild(mark);
+  span.appendChild(document.createTextNode(label));
+  return span;
+}
+
+function buildSteps(rec) {
+  var wrap = document.createElement("div");
+  wrap.className = "steps";
+  PIPELINE_STEPS.forEach(function (label) { wrap.appendChild(stepEl(label, "done")); });
+  var sep = document.createElement("span");
+  sep.className = "steps-sep"; sep.textContent = "→";
+  wrap.appendChild(sep);
+
+  var rank = rec ? AUTO_STAGE_RANK[rec.stage] : undefined;
+  // A hand-set stage (userSet, e.g. the tracker page edited to "no_response")
+  // can sit BELOW an auto rank that was reached earlier — never let a manual
+  // edit erase the auto steps that actually happened.
+  if (rank === undefined && rec) rank = -1;
+
+  BROWSER_STEPS.forEach(function (step) {
+    var stepRank = AUTO_STAGE_RANK[step.key];
+    var state = "pending";
+    if (rank !== undefined) {
+      if (step.key === "submitted" && rank === AUTO_STAGE_RANK.uncertain) state = "uncertain";
+      else if (rank >= stepRank) state = "done";
+    }
+    wrap.appendChild(stepEl(step.label, state));
+  });
+
+  if (rec && MANUAL_STAGES.indexOf(rec.stage) !== -1) {
+    var badge = document.createElement("div");
+    badge.className = "manual-badge";
+    badge.textContent = rec.stage.replace(/_/g, " ");
+    wrap.appendChild(document.createElement("br"));
+    wrap.appendChild(badge);
+  }
+  return wrap;
+}
+
+function render(jobs, tracker) {
+  var body = document.getElementById("body");
+  body.innerHTML = "";
+  jobs.forEach(function (j) {
+    var rec = tracker ? tracker[j.url] : null;
+    var tr = document.createElement("tr");
+
+    var tdJob = document.createElement("td");
+    var a = document.createElement("a");
+    a.href = j.url; a.target = "_blank"; a.textContent = j.title || j.url;
+    var comp = document.createElement("div");
+    comp.className = "company"; comp.textContent = j.company || "";
+    tdJob.appendChild(a); tdJob.appendChild(comp);
+
+    var tdScore = document.createElement("td"); tdScore.textContent = j.score || "—";
+    var tdSteps = document.createElement("td"); tdSteps.appendChild(buildSteps(rec));
+    var tdUpdated = document.createElement("td"); tdUpdated.textContent = rec ? fmtDate(rec.updatedAt) : "—";
+
+    tr.appendChild(tdJob); tr.appendChild(tdScore); tr.appendChild(tdSteps); tr.appendChild(tdUpdated);
+    body.appendChild(tr);
+  });
+}
+
+function queryExtension(jobs) {
+  var note = document.getElementById("note");
+  if (!window.chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+    note.textContent = "Browser-side status unavailable — this page isn't open in a Chrome profile with extension messaging.";
+    render(jobs, null);
+    return;
+  }
+  try {
+    chrome.runtime.sendMessage(EXTENSION_ID,
+      { type: "jt.queryTracker", urls: jobs.map(function (j) { return j.url; }) },
+      function (resp) {
+        if (chrome.runtime.lastError || !resp || !resp.ok) {
+          note.textContent = "Browser-side status unavailable — CV Match Copilot extension not reachable " +
+            "(not installed in this browser, or not yet reloaded after an update).";
+          render(jobs, null);
+          return;
+        }
+        note.textContent = "Browser stage read live from the extension just now.";
+        render(jobs, resp.tracker || {});
+      });
+  } catch (e) {
+    note.textContent = "Browser-side status unavailable (" + e.message + ").";
+    render(jobs, null);
+  }
+}
+
+fetch("jt_status_data.json", { cache: "no-store" })
+  .then(function (r) { return r.json(); })
+  .then(function (data) {
+    var jobs = data.jobs || [];
+    render(jobs, null);
+    queryExtension(jobs);
+  })
+  .catch(function () {
+    document.getElementById("note").textContent = "Could not load job data.";
+  });
+</script>
+</body>
+</html>

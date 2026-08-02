@@ -4,7 +4,169 @@ Read this file first in any new session on this project. It has the
 current status; `README.md` has full architecture/setup detail and
 `GCC_COVERAGE_GUIDE.md` has the manual-application layer.
 
-## STATUS (last updated 2026-07-31)
+## STATUS (last updated 2026-08-02)
+
+**✅ Session wrap-up 2026-08-02 — merged pipeline/browser status tab built
+and live-verified; extension review-before-Submit UX built; a fully silent
+missed daily run caught and given a watchdog.** Three things this session:
+
+1. **Merged status tab (dashboard "🧭 Status")** — the item queued at the end
+   of 2026-08-01's session. Shows a per-job CHECKLIST (Found → Scored →
+   Résumé tailored → Opened in browser → Live JD tailor → Form filled →
+   Submitted, with a badge for manual stages like interview/offer beyond
+   that), not just a current-stage word — fixed same session after Mehul
+   pointed out the first cut buried completed steps. Two real technical
+   findings, both verified live rather than assumed:
+   - The extension's `background.js` gained a new `opened` tracker stage
+     (fires when the dashboard's `?jtApply=1` marker lands on a page, before
+     tailoring even starts — the one browser-side moment nothing tracked
+     before) and a READ-ONLY `jt.queryTracker` handler behind
+     `externally_connectable` (scoped to `localhost:8502` + the hosted
+     dashboard). No write path exists from the dashboard into the
+     extension's storage.
+   - **First implementation attempt (`st.components.v1.html`) silently could
+     not work** — Streamlit renders that into a sandboxed `srcdoc` iframe
+     with an OPAQUE origin; `allow-same-origin` does NOT fix this for
+     `srcdoc` (verified live: `contentWindow.location.origin === "null"`),
+     so `externally_connectable` can never match it no matter how correct
+     the extension side is. Fixed by switching to Streamlit's static file
+     server (`.streamlit/config.toml`'s `enableStaticServing`,
+     `static/jt_status.html` + a Python-regenerated `jt_status_data.json`
+     sidecar) — a real same-origin page, which the extension CAN message.
+     **If a future dashboard feature needs `chrome.runtime` from inside
+     Streamlit, this is the pattern — `components.v1.html` cannot do it.**
+2. **Extension review-before-Submit UX (`content.js`)** — the other item
+   queued at the end of 2026-08-01. The instant a Fill pass completes, the
+   fill bar now shows a compact "N filled confidently, M need a look" line,
+   a click-to-jump chip per flagged field, and auto-scrolls to the first
+   flagged field so you land on it immediately. Reads the EXISTING
+   three-state classes (`jt-confident-filled`/`jt-ai-filled`/`jt-needs-you`)
+   rather than re-deriving confidence, so it can't disagree with the actual
+   field outlines. Already committed and pushed via that repo's autopush
+   hook (`.claude/settings.json` → `scripts/autopush.sh`). **NOT live-tested
+   in a real browser this session** — both available paths were blocked
+   (`file://` URLs refused by the browser automation tool; opening the
+   extension's popup as a plain tab breaks its `activeTab`/`currentWindow`
+   targeting, so "Run on this page" can't be driven that way either).
+   Syntax-checked and the extension's 19-file test suite passes, but ask
+   Mehul to eyeball it on the next real Fill.
+3. **2026-08-02's scheduled run never fired at all** — `gh run list` showed
+   zero runs of any status (not even failed/queued) for the day, well past
+   the 08:30 IST trigger time. `gh workflow view` confirmed the workflow
+   itself was active/enabled, ruling out a config or code bug — this is
+   GitHub's own documented best-effort behavior for `schedule:` triggers,
+   which can be delayed or dropped with no trace. Manually dispatched that
+   day's run, and added `.github/workflows/daily_job_scan_watchdog.yml`: a
+   second, independent cron at 05:00 UTC (10:30 IST) that checks whether a
+   `daily_job_scan.yml` run exists for today and dispatches + Telegram-alerts
+   if not. **This reduces but does not eliminate the risk** — the watchdog
+   is itself a `schedule:` trigger with the same best-effort guarantee, just
+   now two independent crons both need to drop the same day for a fully
+   silent miss, and either way Mehul gets a Telegram alert. A true guarantee
+   would need triggering from outside GitHub Actions (an external
+   cron-ping service hitting the GitHub API) — deliberately not built
+   ahead of need; revisit only if this recurs.
+
+**✅ Session wrap-up 2026-08-01 — semi-assisted apply bridge built and
+live-tested against 10 real queue rows; scoring engine re-synced with the
+extension; two extension bugs found and fixed; one config gap fixed.**
+Six things this session, in order:
+
+1. **Scoring re-sync with the extension.** The extension's `lib/scoring.js`
+   shipped a real fix on 2026-07-29 (the day AFTER this pipeline's 2026-07-28
+   port), and this pipeline's copy had drifted stale. Ported 4 fixes into
+   `scoring_core.py`/`cv_structure.py`: phantom-bigram elimination (bigrams
+   were forming across stopword-collapsed gaps and punctuation, inflating
+   `total_weight` with unmatchable terms), `META_LINE_RE` (location/CTC/
+   notice-period lines no longer show up as "missing skills"), a
+   matched-hidden-by-missing-bigram display bug, and an `achievements`
+   section header (so "ranked 1st among 460+ teams" isn't a permanent false
+   gap). **Verified via re-measurement against real 07-27..07-31 queues, not
+   assumed** — my own first prediction that this would raise scores broadly
+   was WRONG; the real effect was flat-to-slightly-down (46.0% vs 47.5%
+   qualifying at floor 50) with a modest, real re-ranking (top-50 tailoring
+   set: 41/50 unchanged on the one day with real bulk). **`min_score_to_tailor`
+   left at 50, unchanged** — this fix's value is chip/gap accuracy and
+   modest re-ranking, not a floor-recalibration event.
+2. **Semi-assisted apply bridge, built and live-verified.** The dashboard's
+   "Apply" link (`streamlit_app.py::apply_bridge_markdown`) opens a job URL
+   with `?jtApply=1` appended — a plain link, nothing more. The CV Match
+   Copilot (Gemini) Chrome extension (`C:\Claude\cv-match-copilot-gemini`,
+   already loaded automatically by Chrome on covered hosts) notices the
+   marker and auto-runs its own JD-read → tailor → fill on that live page —
+   it sees the FULL JD there, not this pipeline's truncated
+   `description_snippet` — then STOPS. **Submit stays a human action, every
+   time, no exception** — confirmed this is hard-gated behind the
+   extension's own `state.settings.autoSubmit` (default OFF, untouched by
+   this integration) and re-confirmed explicitly after being asked directly
+   to add auto-submit this session — declined, see "Hard design boundary"
+   below, unchanged.
+3. **Live-tested across 10 real queue rows** (claude-in-chrome, real Chrome
+   profile with the extension actually loaded — NOT the sandboxed in-app
+   Browser tool, which has no extensions and would have proven nothing):
+   - Greenhouse (Razorpay): clean — 12 real fields filled, 0% AI-guessed.
+   - Lever (CRED): clean, but the FIRST attempt looked like a total failure
+     (0 fields, no error) — turned out to be the browser-automation tool's
+     ref-click not registering at all (status text stayed blank both times);
+     confirmed by re-triggering via direct JS `.click()`, which filled
+     correctly. **Lesson: a "0 filled, no error" result during automated
+     testing is not proof the extension failed — verify the click itself
+     landed before concluding a code bug.**
+   - Adzuna (4 postings): found a real bug live (see extension repo's
+     CLAUDE.md 2026-08-01 entry — Adzuna's own newsletter modal was
+     pre-empting the hop-through), fixed, re-verified fixed. One hop landed
+     cleanly on a real employer's own career site
+     (`careers.mastercard.com`) — confirming the hop-through can reach a
+     genuine employer ATS, not just other aggregators — though that posting
+     had simply expired (unrelated, real-world staleness).
+   - Okta, JobLeads, BeBee (uncovered hosts): confirmed safe no-op — no
+     panel loads, plain link, exactly as designed.
+   - Shine.com (UST): **found a real config gap** — this host is actually
+     covered by the extension's manifest (was always in the static list)
+     but `config.yaml`'s `apply_bridge.autofill_hosts` only had 4 entries,
+     so the dashboard badge wrongly said "opens only" on a host that
+     auto-fills. **Fixed**: that list now mirrors all 51 hosts in the
+     extension's actual manifest (was 4). Re-sync it by hand if that
+     manifest ever changes — it's duplicated here on purpose so the
+     dashboard doesn't need to read a second project's files at runtime.
+4. **Declined and tried-and-reverted: server-side Adzuna redirect
+   resolution.** Adzuna's API field named `redirect_url` is NOT a redirect —
+   it's a static details page; the real outbound click is a separate,
+   bot-protected link discoverable only by scraping the page (returned
+   HTTP 429 on a single cold `requests.get`, live-tested). Building this
+   from job_pipeline's Python side, at pipeline scale, risked the account
+   behind 84% of daily job volume for a one-click convenience the
+   CLIENT-SIDE (extension) hop already provides more safely. See
+   `sources/adzuna.py`'s comment for the full note — do not re-attempt this
+   without a materially different approach.
+5. **Explicitly asked for, explicitly declined: full auto-submit.** Mid-
+   session, asked directly to make the pipeline auto-submit after landing
+   on the real employer's site. Declined — this is the hard design boundary
+   below, restated with the concrete risk (a false-positive "form detected",
+   the EXACT class of bug found twice this session, would submit instead of
+   just mis-filling if the confidence gate were ever armed). The actual
+   friction turned out to be review SPEED, not wanting less human oversight
+   — see item 6.
+6. **Designed, NOT YET BUILT — next session's work:**
+   (a) Faster review-before-Submit UX in the extension panel: a compact
+   "N filled confidently, M need a look" summary shown the moment Fill
+   completes (today you scroll past score/skill-chip content you already
+   read), each flagged field click-to-jump via `scrollIntoView`, auto-scroll
+   to the first flagged field on completion. Lives entirely in the extension
+   repo (`content.js`).
+   (b) A dashboard "status" tab merging PIPELINE-side stages (found/scored/
+   tailored — already in this repo's CSV) with BROWSER-side stages (opened/
+   tailored-by-extension/filled/submitted — today only visible via the
+   extension's own tracker page) into one per-job checklist. Confirmed
+   explicitly with the owner this is real new engineering, not just a UI
+   tab: needs a NEW tracked stage (`opened`, fired when the extension's
+   `maybeAutoRunArmed` consumes the marker — today nothing tracks arrival,
+   only tailored/filled/submitted/uncertain), `externally_connectable`
+   scoped to `localhost:8502` added to the extension's manifest (so this
+   dashboard can QUERY, never push, the extension's stored tracker state),
+   and a Streamlit-side custom component to render the merge. Owner said to
+   proceed; asked for it in "a new chat" (this doc exists so that chat has
+   full context without re-deriving any of the above).
 
 **✅ Session wrap-up 2026-07-31 — SerpApi confirmed live in production,
 dashboard watchdog added, queue-overwrite bug fixed.** Three things closed
@@ -396,7 +558,9 @@ a scorer that doesn't separate is rearranging deck chairs.
 | `report.py` | Writes `data/job_queue_YYYY-MM-DD.csv` |
 | `notify.py` | Telegram digest |
 | `tracker.py` | Follow-up nudges + weekly stats |
-| `streamlit_app.py` | Dashboard: review queue, run now, edit filters |
+| `streamlit_app.py` | Dashboard: review queue, status checklist, run now, edit filters |
+| `static/jt_status.html` | Status tab's client-side page (real origin, not a `components.v1.html` srcdoc iframe) — queries the extension's `jt.queryTracker` live |
+| `.streamlit/config.toml` | `enableStaticServing = true` — required for `static/jt_status.html` to be servable at all |
 | `smoke_test.py` | 127 offline checks — run before trusting any change |
 | `GCC_COVERAGE_GUIDE.md` | Manual layer: protected-portal email alerts + weekly Naukri/iimjobs routine |
 

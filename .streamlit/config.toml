@@ -1,0 +1,10 @@
+[server]
+# Serves ./static/* at /app/static/* with the SAME origin as the rest of this
+# app (http://localhost:8502 locally, https://job-1357.streamlit.app hosted).
+# Needed for the Status tab (2026-08-02): the CV Match Copilot extension's
+# externally_connectable only grants chrome.runtime messaging to pages whose
+# own real origin matches its manifest — a components.v1.html srcdoc iframe
+# has an opaque "null" origin even with allow-same-origin set (verified live,
+# not assumed), so that path can never reach the extension. A same-origin
+# static page can.
+enableStaticServing = true
