@@ -373,15 +373,32 @@ with tab_status:
     if not queues:
         st.info("No queue CSVs yet.")
     else:
-        status_df = pd.read_csv(queues[0], encoding="utf-8-sig",
+        from datetime import date as _d2
+        status_by_day = {Path(p).stem.replace("job_queue_", ""): p for p in queues}
+        status_available = sorted(status_by_day, reverse=True)
+        status_picked = st.date_input(
+            "Queue date", value=_d2.fromisoformat(status_available[0]),
+            min_value=_d2.fromisoformat(status_available[-1]),
+            max_value=_d2.fromisoformat(status_available[0]),
+            key="status_date",
+            help="Applications keep moving through their steps after the day "
+                 "they were tailored — pick any past day to see that day's "
+                 "queue, still checked against today's live browser state.")
+        status_key = status_picked.isoformat()
+        if status_key not in status_by_day:
+            status_key = min(status_available,
+                              key=lambda dd: abs((_d2.fromisoformat(dd) - status_picked).days))
+        status_chosen = status_by_day[status_key]
+
+        status_df = pd.read_csv(status_chosen, encoding="utf-8-sig",
                                  keep_default_na=False)
         status_tailored = status_df[status_df["tailored_summary"] != ""]
-        st.caption(f"Showing **{Path(queues[0]).stem.replace('job_queue_', '')}** "
-                   f"— {len(status_tailored)} tailored job(s). Pipeline stage "
-                   f"comes from this CSV; browser stage is read live from the "
-                   f"CV Match Copilot extension in *your* browser — it will "
-                   f"only show data if this page is open in the Chrome "
-                   f"profile that has the extension installed.")
+        st.caption(f"Showing **{status_key}** — {len(status_tailored)} tailored "
+                   f"job(s), {len(status_available)} day(s) stored. Pipeline "
+                   f"stage comes from this day's CSV; browser stage is read "
+                   f"live from the CV Match Copilot extension in *your* "
+                   f"browser — it will only show data if this page is open "
+                   f"in the Chrome profile that has the extension installed.")
 
         static_dir = ROOT / "static"
         static_dir.mkdir(exist_ok=True)
@@ -399,7 +416,12 @@ with tab_status:
 
         import streamlit.components.v1 as components
         components.iframe(
-            src="/app/static/jt_status.html",
+            # Cache-bust on the selected day: the iframe's src is otherwise
+            # identical across reruns, so switching dates would rewrite
+            # jt_status_data.json server-side but the already-loaded iframe
+            # would never re-fetch it (Streamlit reuses the DOM node when
+            # src is unchanged).
+            src=f"/app/static/jt_status.html?d={status_key}",
             height=min(120 + 40 * max(len(status_tailored), 1), 700),
             scrolling=True)
 
