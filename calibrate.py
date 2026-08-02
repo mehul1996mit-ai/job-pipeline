@@ -162,7 +162,13 @@ def counterfactual_gaps(jd: dict, parsed_cv: dict, sm: dict, agg_kwargs=None,
                     "delta": r["score"] - baseline})
 
     # Experience shortfall — worth however many points the threshold curve
-    # gives back at exactly the stated minimum, not more.
+    # gives back at exactly the stated minimum, not more. Kept OUT of `out`
+    # (the ranked "close these first" list) — mirrors lib/calibrate.js, fixed
+    # there 2026-08-01 on owner report: phrased identically to a skill gap
+    # ("+6 ... would move you 56 -> 62"), this reads as an actionable to-do,
+    # but tenure isn't something you can add before applying. Reported
+    # separately in `not_actionable` instead.
+    not_actionable = []
     try:
         min_y = float(jd.get("min_years") or 0)
     except (TypeError, ValueError):
@@ -172,12 +178,14 @@ def counterfactual_gaps(jd: dict, parsed_cv: dict, sm: dict, agg_kwargs=None,
         cv_exp = dict(parsed_cv)
         cv_exp["total_years"] = min_y
         re_ = aggregate_score(jd, cv_exp, sm, **agg_kwargs)
-        out.append({
-            "kind": "experience",
-            "requirement": f"{min_y:g} years of experience (you show "
-                           f"{round(have * 10) / 10:g})",
-            "tier": "must", "from": baseline, "to": re_["score"],
-            "delta": re_["score"] - baseline})
+        gap = re_["score"] - baseline
+        if gap > 0:
+            not_actionable.append({
+                "kind": "experience",
+                "requirement": f"{min_y:g} years of experience (you show "
+                               f"{round(have * 10) / 10:g})",
+                "tier": "must", "from": baseline, "to": re_["score"],
+                "delta": gap})
 
     # Checkable education gate — this also lifts the hard cap, so its delta is
     # usually the largest single number. That is correct: an ineligibility is
@@ -200,6 +208,7 @@ def counterfactual_gaps(jd: dict, parsed_cv: dict, sm: dict, agg_kwargs=None,
     return {
         "baseline": baseline,
         "gaps": ranked,
+        "not_actionable": not_actionable,
         "zero_impact": [g["requirement"] for g in out if g["delta"] <= 0],
         "note": ("Ranked by score impact, not by how often the posting repeats "
                  "the word." if ranked else

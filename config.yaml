@@ -251,3 +251,79 @@ digest:
   # "top 50 tailored" are the identical 50 jobs, not two different cuts.
   top_n: 50                    # jobs in the Telegram digest
   followup_days: 7             # nudge after N days with no recorded response
+
+# ----------------------------------------------------------- apply_bridge
+# Semi-assisted apply (2026-07-31): the dashboard's "Apply" link opens the
+# job URL with one extra query parameter (?jtApply=1) in a new tab -- a plain
+# link, no extension messaging or permissions involved. The CV Match Copilot
+# (Gemini) Chrome extension's content script (already loaded automatically by
+# Chrome on the hosts below) notices the marker and auto-runs its own
+# JD-read -> tailor -> fill on that live page -- it sees the FULL JD, not the
+# pipeline's truncated description_snippet -- then stops. Pressing Submit
+# stays a human action, every time, no exception. This does NOT change what
+# the pipeline itself tailors/sends in the Telegram digest; it's additive.
+apply_bridge:
+  enabled: true
+  # Hosts the extension's manifest.json actually auto-fills on today --
+  # every host in content_scripts.matches, not just the direct-apply ATS
+  # platforms this pipeline sources from. CORRECTED 2026-08-01: live testing
+  # found shine.com (a real source host, via SerpApi) already auto-runs on
+  # the extension, but this list only had 4 entries -- the dashboard badge
+  # was wrongly telling the user "opens only" on a host that actually
+  # auto-fills. Any host still absent from this list opens fine on "Apply" --
+  # the extension just won't auto-run there yet (documented gap, not a
+  # crash). Kept here (not re-derived from the extension repo at runtime) so
+  # the dashboard can show an honest per-row badge without reading a second
+  # project's manifest -- re-sync this list by hand if that manifest changes.
+  autofill_hosts:
+    - linkedin.com
+    - naukri.com
+    - indeed.com
+    - glassdoor.com
+    - glassdoor.co.in
+    - iimjobs.com
+    - foundit.in
+    - foundit.com
+    - timesjobs.com
+    - internshala.com
+    - cutshort.io
+    - instahyre.com
+    - unstop.com
+    - wellfound.com
+    - workatastartup.com
+    - remoteok.com
+    - weworkremotely.com
+    - remotive.com
+    - flexjobs.com
+    - jooble.org
+    - adzuna.com
+    - adzuna.in
+    - adzuna.co.in
+    - amazon.jobs
+    - careers.microsoft.com
+    - jobs.careers.microsoft.com
+    - careers.google.com
+    - jobs.cisco.com
+    - smartrecruiters.com
+    - eightfold.ai
+    - icims.com
+    - boards.greenhouse.io
+    - job-boards.greenhouse.io
+    - jobs.lever.co
+    - myworkdayjobs.com
+    - freshersworld.com
+    - hirect.in
+    - shine.com
+    - ycombinator.com
+    - careers.salesforce.com
+    - careers.adobe.com
+    - careers.oracle.com
+    - oraclecloud.com
+    - careers.servicenow.com
+    - peoplestrong.com
+    - darwinbox.com
+    - darwinbox.in
+    - keka.com
+    - recruit.zoho.com
+    - recruit.zoho.in
+    - turbohire.co

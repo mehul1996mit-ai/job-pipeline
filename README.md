@@ -208,21 +208,37 @@ latest scan without the app itself doing any scheduled work.
 ## Applying — semi-assisted, not automated
 
 Stage 4 gives you, per job: the link, a tailored DOCX/PDF resume file, lead
-bullets, and an honest gap note. From there:
+bullets, and an honest gap note. The dashboard's **Apply** link (next to
+"Open job posting" in the queue) is the semi-assisted path — added
+2026-07-31/08-01 alongside the **CV Match Copilot** Chrome extension
+(`C:\Claude\cv-match-copilot-gemini`, a separate sibling project):
 
-- **Direct-apply portals (Workday/Greenhouse/Lever style forms):** ask your
-  Claude session to open a specific row's link and it will drive the browser
-  to upload the tailored resume and fill in safe, non-sensitive fields (name,
-  phone, email, links) from your profile — then it stops and waits for you to
-  review and click Submit yourself.
-- **LinkedIn/Naukri/anything behind your personal login:** these require
-  your own session, so Claude hands you the link + tailored file and you
-  apply directly — usually under 2 minutes per job with the tailored resume
-  already in hand.
+- **Apply** opens the job URL with one extra marker (`?jtApply=1`) — a
+  plain link, no messaging, no extra permission. If the extension is
+  installed and that host is one it covers (51 hosts as of 2026-08-01,
+  including every ATS this pipeline sources from, plus Adzuna, LinkedIn,
+  Naukri, Indeed, and more — see `config.yaml`'s `apply_bridge
+.autofill_hosts`), it notices the marker and automatically reads the JD,
+  tailors your resume against the FULL posting text (not this pipeline's
+  truncated snippet), and fills the application form — then **stops**.
+- **Adzuna listings** get one extra hop: Adzuna's own page isn't the real
+  application, so the extension follows the posting's own "apply" link
+  through to the actual employer (or, sometimes, another aggregator) before
+  filling — automatically, in your own browser session.
+- **Any other employer page** the extension doesn't auto-load on: click the
+  extension's toolbar icon → "Run on this page" — one extra click, works on
+  any domain, no new standing permission.
+- **A host the extension doesn't cover at all**, or no extension installed:
+  Apply just opens the link like a plain click — same as always.
 
-This split isn't a current-tech limitation to be removed later — see the
-design boundary above. Final submission stays a human action on every
-portal, always.
+**Whatever happens above, reviewing and clicking Submit is yours, every
+single time — this is enforced in the extension's own code (hard-gated
+behind a setting that defaults OFF and this integration never touches), not
+just a UI convention.** This was asked to be changed to full auto-submit
+during this feature's build (2026-08-01) and declined — see the design
+boundary above. The friction that request was actually pointing at (review
+feels slow) is being addressed by making the review step itself faster, not
+by removing it.
 
 ## Free-tier setup (one-time, ~20 minutes)
 

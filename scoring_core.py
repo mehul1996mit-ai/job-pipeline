@@ -71,6 +71,19 @@ REQ_LINE_RE = re.compile(
     r"(require|must[- ]have|qualif|essential|skills?|competenc|proficien"
     r"|expertise|mandator)", re.I)
 
+# Posting ADMIN/METADATA lines — location, pay band, notice period, posting
+# provenance. Their words are real words but never competencies, so they are
+# excluded from the MATCHED/MISSING chips (DISPLAY only — scoring inputs are
+# deliberately untouched so the frozen formula keeps its exact behaviour).
+# Without this, a real posting offered "navi mumbai"/"vashi navi" as skills
+# the CV was missing. Ported from lib/scoring.js (fixed there 2026-07-29).
+META_LINE_RE = re.compile(
+    r"^\s*(job\s*)?(location|locations|address|city|venue|salary|ctc"
+    r"|compensation|pay|package|stipend|budget|notice\s*period"
+    r"|posted\s*(by|on)|apply|contact|email|phone|reference"
+    r"|req(uisition)?\s*(id|no|code)|employment\s*type|shift|vacanc"
+    r"|openings?|no\.?\s*of\s*positions?)\b", re.I)
+
 # Domain bonus keywords — overridable from config. Additive only, NEVER a filter.
 DEFAULT_DOMAIN_KEYWORDS = [
     "lending", "credit", "nbfc", "fintech", "loan", "bfsi", "digital banking",
@@ -83,6 +96,20 @@ BONUS_CAP = 20
 
 _TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9+#./-]+")
 _LINE_SPLIT_RE = re.compile(r"[\n\r]+|(?:[.;!?]\s+)")
+
+# A "bigram" used to be any two SURVIVING tokens sitting next to each other in
+# the stopword-FILTERED list — not the same thing as being adjacent in the
+# text. Two artifacts followed: dropped-stopword collapse ("Primary
+# responsibility of the role would be to define…" -> phantom "primary
+# define") and punctuation collapse ("Product Strategy, Product development"
+# -> "strategy product"). Neither is a competency any CV could match, and
+# both inflated total_weight with unmatchable terms, depressing every score.
+# Fixed (ported from lib/scoring.js, fixed there 2026-07-29) by splitting a
+# line into SEGMENTS at list/clause punctuation and recording each token's
+# RAW position so a bigram only forms from genuinely neighbouring words.
+# "/" and "." stay word characters (so "agile/scrum" and "node.js" survive
+# whole) and are deliberately NOT segment separators.
+_SEGMENT_SPLIT_RE = re.compile(r"[,;:&()\[\]{}|\"'`•·*]+|\s[-–—]+\s|\s{3,}")
 
 
 def js_round(x: float) -> int:
@@ -164,13 +191,30 @@ def token_parts(raw: str):
     return {"raw": t, "syn": syn, "canon": stem(syn)}
 
 
-def tokens_of(line: str) -> list[dict]:
-    raw = _TOKEN_SPLIT_RE.sub(" ", str(line or "").lower()).split()
+def segments_of(line: str) -> list[str]:
+    return [s for s in _SEGMENT_SPLIT_RE.split(str(line or "")) if s.strip()]
+
+
+def tokens_of_segment(segment: str) -> list[dict]:
+    """Tokens of ONE segment, each carrying "i" — its index in the segment's
+    raw word list — so callers can tell real adjacency from filter-induced
+    adjacency. Returns {"c": canonical, "s": surface, "i": raw position}."""
+    raw = _TOKEN_SPLIT_RE.sub(" ", str(segment or "").lower()).split()
     out = []
-    for r in raw:
+    for i, r in enumerate(raw):
         tk = canonical_token(r)
         if tk:
-            out.append(tk)
+            out.append({"c": tk["c"], "s": tk["s"], "i": i})
+    return out
+
+
+def tokens_of(line: str) -> list[dict]:
+    """All tokens of a line, in order, as one flat list. Bigrams are never
+    formed across a segment boundary — each_adjacent_pair walks segments
+    separately; this is for token-only consumers."""
+    out = []
+    for seg in segments_of(line):
+        out.extend(tokens_of_segment(seg))
     return out
 
 
@@ -183,16 +227,28 @@ def split_lines(text: str) -> list[str]:
     return [ln for ln in _LINE_SPLIT_RE.split(str(text or "")) if ln.strip()]
 
 
+def each_adjacent_pair(line, cb) -> None:
+    """Walk every genuinely-adjacent token pair of a line, segment by
+    segment. cb(prev_token, token) fires only when the two words really did
+    sit next to each other in the source text."""
+    for seg in segments_of(line):
+        toks = tokens_of_segment(seg)
+        for j in range(1, len(toks)):
+            if toks[j]["i"] == toks[j - 1]["i"] + 1:
+                cb(toks[j - 1], toks[j])
+
+
 def index_text(text: str) -> dict:
-    """Canonical token set + consecutive-token bigram set for a body of text."""
+    """Canonical token set + adjacent-token bigram set for a body of text."""
     tokens: set[str] = set()
     bigrams: set[str] = set()
     for line in split_lines(text):
-        toks = tokens_of(line)
-        for j, tk in enumerate(toks):
+        for tk in tokens_of(line):
             tokens.add(tk["c"])
-            if j > 0:
-                bigrams.add(toks[j - 1]["c"] + " " + tk["c"])
+
+        def _add(a, b):
+            bigrams.add(a["c"] + " " + b["c"])
+        each_adjacent_pair(line, _add)
     return {"tokens": tokens, "bigrams": bigrams}
 
 
@@ -210,26 +266,36 @@ def compute_match(jd_text: str, cv_text: str, domain_keywords=None) -> dict:
     # accumulates — display/is_bigram/hit stay as first seen, matching the JS.
     terms: dict[str, dict] = {}
 
-    def add_term(canon, display, weight, is_bigram, hit):
+    def add_term(canon, display, weight, is_bigram, hit, is_content):
         rec = terms.get(canon)
         if rec is None:
             rec = {"term": canon, "display": display, "weight": 0,
-                   "is_bigram": is_bigram, "hit": hit}
+                   "is_bigram": is_bigram, "hit": hit, "content_hits": 0}
             terms[canon] = rec
         rec["weight"] = min(PER_TERM_WEIGHT_CAP, rec["weight"] + weight)
+        if is_content:
+            rec["content_hits"] += 1
 
     for line in split_lines(jd_text):
         line_weight = 2 if REQ_LINE_RE.search(line) else 1
-        toks = tokens_of(line)
-        for j, tk in enumerate(toks):
+        # Posting METADATA (location, salary band, notice period, posted-by…)
+        # still scores exactly as before — removing it from scoring would
+        # change the frozen formula's inputs. But it must never reach the
+        # CHIPS: telling a candidate their CV is "missing navi mumbai" is
+        # nonsense. A term is chip-eligible only if it occurred at least once
+        # on a real content line. Ported from lib/scoring.js (2026-07-29).
+        is_content = not META_LINE_RE.match(line)
+        for tk in tokens_of(line):
             add_term(tk["c"], tk["s"], 1 * line_weight, False,
-                     tk["c"] in cv["tokens"])
-            if j > 0:
-                # A bigram is a competency of its own: it only matches the CV's
-                # own bigram set. Having both words separately does NOT count.
-                bc = toks[j - 1]["c"] + " " + tk["c"]
-                bd = toks[j - 1]["s"] + " " + tk["s"]
-                add_term(bc, bd, 2 * line_weight, True, bc in cv["bigrams"])
+                     tk["c"] in cv["tokens"], is_content)
+
+        def _add_bigram(a, b):
+            # A bigram is a competency of its own: it only matches the CV's
+            # own bigram set. Having both words separately does NOT count.
+            bc = a["c"] + " " + b["c"]
+            bd = a["s"] + " " + b["s"]
+            add_term(bc, bd, 2 * line_weight, True, bc in cv["bigrams"], is_content)
+        each_adjacent_pair(line, _add_bigram)
 
     total_weight = sum(r["weight"] for r in terms.values())
     hit_weight = sum(r["weight"] for r in terms.values() if r["hit"])
@@ -256,14 +322,22 @@ def compute_match(jd_text: str, cv_text: str, domain_keywords=None) -> dict:
     matched_terms.sort(key=rank_key)
     missing_terms.sort(key=rank_key)
 
-    bigram_halves: set[str] = set()
-    for rec in terms.values():
-        if rec["is_bigram"]:
-            bigram_halves.update(rec["term"].split(" "))
-
     def display(lst):
-        return [r["display"] for r in lst
-                if r["is_bigram"] or r["term"] not in bigram_halves]
+        # Chip-eligible only if it occurred on a real (non-metadata) content
+        # line at least once — see the META_LINE_RE note above.
+        visible = [r for r in lst if r["content_hits"] > 0]
+        # Drop a unigram when a bigram ALREADY SHOWN IN THE SAME LIST contains
+        # it ("product management" shouldn't also show "product"/"management").
+        # Computed PER LIST, not globally: a matched unigram must never be
+        # hidden by an unrelated MISSING bigram that merely shares a word
+        # (e.g. matched "kubernetes" hidden by missing "kubernetes essential").
+        # Ported from lib/scoring.js (fixed there 2026-07-29).
+        halves: set[str] = set()
+        for r in visible:
+            if r["is_bigram"]:
+                halves.update(r["term"].split(" "))
+        return [r["display"] for r in visible
+                if r["is_bigram"] or r["term"] not in halves]
 
     return {
         "score": max(0, min(100, base + bonus)),

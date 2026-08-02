@@ -34,10 +34,17 @@ SECTION_HEADERS = [
     ("education", re.compile(r"^education\b", re.I)),
     ("projects", re.compile(r"^(key\s+|selected\s+)?projects\b", re.I)),
     ("certifications", re.compile(r"^(certifications?|licen[cs]es?|credentials)\b", re.I)),
+    # Ported from lib/cvparse.js (added there 2026-07-29): without this,
+    # achievements/awards were not a recognized section anywhere, so lines
+    # like "Ranked 1st among 460+ teams" fell outside every section and the
+    # audit compared JD numbers ("460") against text that structurally
+    # couldn't contain them — a permanent false "missing" on every run.
+    ("achievements", re.compile(
+        r"^(key\s+|selected\s+)?(achievements?|awards?|honou?rs?|accomplishments?)\b", re.I)),
 ]
 
 _SECTION_KEYS = ["summary", "skills", "experience", "education",
-                 "projects", "certifications"]
+                 "projects", "certifications", "achievements"]
 
 
 def now_index() -> int:

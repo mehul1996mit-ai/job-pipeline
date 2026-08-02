@@ -15,6 +15,22 @@ from . import normalize
 
 BASE = "https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
 
+# NOT pursued (tried and reverted 2026-08-01): Adzuna's API field named
+# "redirect_url" is actually a static, 200-OK details page
+# (adzuna.in/details/{id}), not an HTTP redirect -- the real outbound click
+# lives at a separate path (adzuna.in/land/ad/{id}), discoverable only by
+# scraping the details page's HTML. Tested live: a single cold request to
+# that path returned 429. That endpoint is bot-protected, and resolving it
+# programmatically from ~50 jobs/day, from a GitHub Actions IP, risks
+# tripping abuse detection on the account this pipeline's highest-volume
+# source (84% of a typical day's queue) depends on -- the same class of risk
+# already declined for Naukri/LinkedIn scraping elsewhere in this project.
+# Not worth it for a one-click convenience. The apply-bridge link still works
+# fine on the details page itself (the extension already auto-loads there
+# per manifest.json's content_scripts, tailors normally, and reports "no
+# form here" rather than erroring) -- Apply just costs one extra manual click
+# through to the real employer page, same as it does without any of this.
+
 
 def fetch(config, log=print):
     app_id = os.environ.get("ADZUNA_APP_ID")
