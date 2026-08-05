@@ -2,7 +2,13 @@ name: Daily job scan
 
 on:
   schedule:
-    - cron: "0 3 * * *" # daily 03:00 UTC (08:30 IST)
+    # 03:17 UTC (08:47 IST), not the round 03:00. GitHub's scheduler queues
+    # every repo's workflow that requested the exact same top-of-hour minute,
+    # and that queueing is real, not theoretical here: checked run history
+    # back to 07-23 and "0 3 * * *" was landing 09:20-13:30 UTC EVERY DAY,
+    # 6-10h late, never once close to 03:00 (found + fixed 2026-08-05). An
+    # off-round minute avoids the biggest cluster of competing schedules.
+    - cron: "17 3 * * *"
   workflow_dispatch: {}
 
 permissions:

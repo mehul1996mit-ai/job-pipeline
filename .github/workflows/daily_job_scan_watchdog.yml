@@ -4,16 +4,24 @@ name: Daily job scan watchdog
 # delayed, or in rare cases dropped with NO trace at all (no failed run, no
 # queued run — just nothing). Confirmed live 2026-08-02: daily_job_scan.yml's
 # 03:00 UTC trigger never fired that day; `gh run list` showed zero runs of
-# any status. This is a second, INDEPENDENT scheduled trigger 2 hours later
-# that checks whether today's scan actually completed and dispatches it if
-# not, then alerts Telegram so a missed day is always visible instead of
-# silent. This reduces, but cannot fully eliminate, the risk — this trigger
-# is itself a `schedule:` and shares the same best-effort guarantee. Two
-# independent crons both dropping the same day is materially less likely
+# any status. This is a second, INDEPENDENT scheduled trigger a few hours
+# later that checks whether today's scan actually completed and dispatches
+# it if not, then alerts Telegram so a missed day is always visible instead
+# of silent. This reduces, but cannot fully eliminate, the risk — this
+# trigger is itself a `schedule:` and shares the same best-effort guarantee.
+# Two independent crons both dropping the same day is materially less likely
 # than one, and either way you get told.
+#
+# Also off the round hour (2026-08-05 fix, same root cause as the primary
+# workflow's comment): this watchdog was ALSO landing 7-9h late every day
+# (05:00 UTC configured, actually ran ~12:00-14:00 UTC) because "0 5 * * *"
+# queues behind every other repo's identical schedule. Confirmed live: it
+# kept firing ~50min after the also-delayed primary run, which is why it
+# never had to intervene despite both being chronically late — pure luck
+# that the two delays roughly matched, not something to rely on.
 on:
   schedule:
-    - cron: "0 5 * * *" # 05:00 UTC / 10:30 IST — 2h after the primary 03:00 UTC run
+    - cron: "39 5 * * *" # 05:39 UTC / 11:09 IST
   workflow_dispatch: {}
 
 permissions:
