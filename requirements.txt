@@ -5,3 +5,7 @@ python-docx
 reportlab
 streamlit
 pandas
+dnspython
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib

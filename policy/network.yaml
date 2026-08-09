@@ -1,0 +1,27 @@
+# network.yaml — Mehul's own map of who he actually knows, feeding
+# warm_path_distance in A3 (hiring-authority graph). This file is read, never
+# written or inferred by code — no social-graph traversal, no LinkedIn
+# connections import, ever (master prompt §5.2). It only reflects paths you
+# add yourself.
+#
+# distance meanings:
+#   0 = you know them directly
+#   1 = shared employer (past or present), shared alma mater, or a mutual
+#       contact you've added below who can make an intro
+#   2 = same sub-sector, plausible cold-but-relevant (no path needed here —
+#       this is authority_graph.py's default for anyone not listed at all)
+#   3 = no path (also the default — nothing to enter for this case)
+#
+# Match key is the person's name, normalized (lowercased, punctuation
+# stripped) by authority_graph.py — exact spelling in `person` doesn't need
+# to be perfect, just consistent enough to match what you'll enter later.
+#
+# people: []   # nothing entered yet — fill in as you identify real contacts.
+#
+# Example (commented out):
+# people:
+#   - person: "Rohan Mehta"
+#     company: "Razorpay"
+#     distance: 1
+#     via: "ex-colleague at Bajaj Finance, 2022"
+people: []

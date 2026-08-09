@@ -1,0 +1,6 @@
+# suppression.txt — global suppression list, checked before every outreach draft.
+#
+# One entry per line: an email address, or a company name prefixed "company:".
+# A closed-out thread (2 follow-ups, no reply) is added here automatically for
+# 180 days by outreach.py once A8 exists. Manual entries (e.g. "please don't
+# contact me again" replies) can be added by hand any time.

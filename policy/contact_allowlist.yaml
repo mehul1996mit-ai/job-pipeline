@@ -1,0 +1,21 @@
+# contact_allowlist.yaml — the F2 gate's source of truth.
+#
+# A contact may enter the outreach queue ONLY if it carries a non-null
+# consent_basis from this list. Anything else is rejected, logged, and the
+# company's track is set to PORTAL_APPLY. There is no fallback and no
+# "best-effort" path — see outreach_store.py's insert_contact_channel(),
+# which is the only function permitted to write contact_channel rows and
+# raises if consent_basis is missing or not in this list.
+#
+# Forbidden absolutely, regardless of what this file says: LinkedIn scraping
+# or automation of any kind; email-pattern guessing (first.last@company.com);
+# SMTP RCPT TO probing; purchased/leaked/brokered lists; scraping personal
+# profiles. Do not add a category here that could legitimize any of those.
+valid_consent_basis:
+  - careers_page_published      # address printed on the company's own careers page
+  - job_post_listed_contact     # address inside the JD itself
+  - ats_apply_by_email          # the apply-to address for an email-application role
+  - user_existing_relationship  # user has corresponded with this person before
+  - user_network_referral       # a mutual contact supplied it with the person's knowledge
+  - inbound_recruiter           # they contacted the user first
+  - portal_opt_in_channel       # Naukri/iimjobs recruiter who has opted into being contacted

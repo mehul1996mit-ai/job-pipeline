@@ -18,3 +18,5 @@ data/career_agent.sqlite3*
 # watchdog auto-sync status (local runtime state, not code)
 dashboard_sync.log
 cron_delay_check.log
+# A8's .eml fallback output — real outreach drafts or test artifacts, never source.
+out/drafts/

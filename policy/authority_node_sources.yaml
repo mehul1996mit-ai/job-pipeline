@@ -1,0 +1,11 @@
+# authority_node_sources.yaml — the only valid `source` values for an
+# authority_node row (see master prompt §5.2). Node discovery is restricted
+# to public, non-scraped sources plus the user's own manual entries — no
+# social-graph traversal, no LinkedIn automation, ever.
+valid_sources:
+  - company_leadership_page      # company's own "About"/"Leadership" page
+  - press_release                # company or wire-service press release
+  - regulatory_filing            # RBI/SEBI/MCA filing naming an officer
+  - conference_speaker_list      # published speaker bio at an industry event
+  - published_byline_or_podcast  # authored article or podcast appearance
+  - user_manual_entry            # Mehul entered this himself

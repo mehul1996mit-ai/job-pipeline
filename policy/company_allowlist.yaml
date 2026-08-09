@@ -1,0 +1,187 @@
+# company_allowlist.yaml
+#
+# Shared across Career Agent (A2) and job_pipeline. This is a GUARANTEED-INCLUDE
+# FLOOR, not an exclusive universe: every company below is force-included in A2's
+# target list regardless of what its signal scoring would otherwise say, and is
+# exempt from the DORMANT cap described in A2 (see company_targeting.py). A2's
+# normal open-market discovery (RBI/NHB registers, SEBI filings, Adzuna employer
+# aggregates, growth signals) continues to run alongside this file and MAY add
+# companies beyond it. This file sets a minimum, not a maximum.
+#
+# Deduped from the user-supplied 150: Perfios / Perfios Software Solutions (86, 143)
+# and M2P Fintech / M2P Solutions (24, 144) are single entries below — same legal
+# entity under two names. Setu is included as a Pine Labs subsidiary with a note,
+# not as an independent target. NPCI BHIM is filed under the entity NPCI.
+#
+# scope: "floor" is enforced in code — see company_targeting.py force_include_companies().
+scope: floor
+version: 2
+updated_at: "2026-08-04"
+categories:
+  payments_merchant_solutions:
+    - PhonePe
+    - Paytm
+    - Razorpay
+    - Cashfree Payments
+    - Pine Labs
+    - BillDesk
+    - PayU India
+    - MobiKwik
+    - BharatPe
+    - CCAvenue
+    - Easebuzz
+    - Instamojo
+    - Juspay
+    - PayGlocal
+    - Mswipe
+    - Innoviti
+    - PayNearby
+    - Ezetap
+    - Zaggle
+    - ToneTag
+    - FSS (Financial Software & Systems)
+    - NPCI
+    - Setu   # note: Pine Labs subsidiary, kept separate for org-mapping purposes
+    - Decentro
+    - M2P Fintech   # dedup: same entity as "M2P Solutions"
+  lending_fintechs_digital_credit:
+    - Navi
+    - Lendingkart
+    - Kissht
+    - Moneyview
+    - Fibe
+    - CASHe
+    - KreditBee
+    - Stashfin
+    - Axio (Capital Float)
+    - Freo
+    - LoanTap
+    - FlexiLoans
+    - NeoGrowth
+    - Oxyzo
+    - Mintifi
+    - Progcap
+    - GetVantage
+    - CredAble
+    - LenDenClub
+    - Saraloan
+    - Rupeek
+    - IndiaLends
+    - LoanCircle
+    - Vivifi India
+    - Biz2Credit India
+  wealthtech_investment:
+    - Groww
+    - Zerodha
+    - Upstox
+    - Angel One
+    - Dhan
+    - INDmoney
+    - ET Money
+    - Smallcase
+    - Scripbox
+    - Kuvera
+    - Stable Money
+    - Cube Wealth
+    - Dezerv
+    - Wealthy
+    - GoalTeller
+  insurtech:
+    - Policybazaar
+    - Acko
+    - Go Digit
+    - InsuranceDekho
+    - Turtlemint
+    - RenewBuy
+    - Coverfox
+    - Plum
+    - Pazcare
+    - BimaPe
+  neobanks_banking_platforms:
+    - Open Financial Technologies
+    - Fi Money
+    - Jupiter
+    - Niyo
+    - Zolve
+    - Karbon Card
+    - OneCard
+    - Slice
+    - InstantPay
+    - YAP India
+  fintech_infrastructure_api_saas:
+    - Perfios   # dedup: same entity as "Perfios Software Solutions"
+    - Signzy
+    - Yubi
+    - HyperVerge
+    - Digio
+    - IDfy
+    - AuthBridge
+    - FinBox
+    - Bureau
+    - Data Sutram
+    - Leegality
+    - eMudhra
+    - Karza Technologies
+    - Finvu
+    - CamCom
+  large_nbfcs:
+    - Bajaj Finance   # note: user's employer — see conflict-of-interest handling below
+    - Tata Capital
+    - Shriram Finance
+    - Cholamandalam Investment & Finance
+    - Mahindra Finance
+    - Muthoot Finance
+    - Manappuram Finance
+    - L&T Finance
+    - Aditya Birla Finance
+    - HDB Financial Services
+    - Hero FinCorp
+    - Poonawalla Fincorp
+    - Piramal Finance
+    - IIFL Finance
+    - Capri Global Capital
+    - U GRO Capital
+    - MAS Financial Services
+    - Arman Financial Services
+    - Five-Star Business Finance
+    - IndoStar Capital Finance
+  housing_finance_companies:
+    - LIC Housing Finance
+    - PNB Housing Finance
+    - Aavas Financiers
+    - Aptus Value Housing Finance
+    - Can Fin Homes
+    - Repco Home Finance
+    - GIC Housing Finance
+    - Home First Finance
+    - India Shelter Finance
+    # note: "Aptus Finance India" (129 in source list) deduped into Aptus Value
+    # Housing Finance above — same corporate group, avoid double-counting.
+  specialized_msme_finance:
+    - Satin Creditcare Network
+    - CreditAccess Grameen
+    - Spandana Sphoorty
+    - Fusion Finance
+    - Annapurna Finance
+    - ESAF Small Finance
+    - Avanse Financial Services
+    - InCred Finance
+    - Clix Capital
+    - Hinduja Leyland Finance
+  emerging_fintechs_financial_platforms:
+    - CRED
+    - Zeta
+    - Kaleidofin
+    - FinAGG Technologies
+    - SaveIN
+    - NDX P2P
+    - CashE Marketplace
+    - BankBazaar
+# Bajaj Finance is the user's current employer. A2 includes it in the target universe
+# per instruction, but A8 (Outreach Composer, not yet built) MUST route it to a
+# manual-review-only state and never auto-draft — this is the conflict-of-interest
+# boundary. Enforced today in outreach_store.py / ratelimit.py preconditions as soon
+# as A8 lands; company_targeting.py already tags this company is_conflict_of_interest=1
+# so downstream code has no way to miss it.
+conflict_of_interest_companies:
+  - Bajaj Finance
