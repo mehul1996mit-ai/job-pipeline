@@ -1,10 +1,145 @@
 # job_pipeline — project context for Claude
 
 Read this file first in any new session on this project. It has the
-current status; `README.md` has full architecture/setup detail and
+current status; `README.md` has full architecture/setup detail (including
+a new "Career Agent" section — read that first for A2/A3/A5/A8/A9) and
 `GCC_COVERAGE_GUIDE.md` has the manual-application layer.
 
+**Career Agent's original 9-agent scope is now fully built (A2/A3/A5/A8/A9,
+all extending job_pipeline in place) — see the A9 entry directly below.**
+There are still ZERO real contacts/outreach in the system, so A9's
+reply-detection and 30-day weight refit are real and tested against
+synthetic fixtures but have nothing live to run against yet. Outreach
+starts, and A9 starts having something real to track, only once a contact
+is supplied (`user_existing_relationship`/`user_network_referral`/
+`inbound_recruiter`) or a real posting yields an apply-by-email address —
+check with Mehul on sequencing rather than assuming.
+
 ## STATUS (last updated 2026-08-09)
+
+**✅ A9 CRM/calibration loop built — Career Agent's original 9-agent scope
+(A2/A3/A5/A8/A9) is now fully built,** closing out the last unbuilt piece
+noted at the top of this file. New file `outreach_crm.py`:
+- **State machine** (`update_outreach_state()`) — the only permitted path to
+  move an `outreach` row through DRAFTED → SENT_BY_USER → REPLIED →
+  INTERVIEW/REJECTED → CLOSED. Validates against an explicit
+  `ALLOWED_TRANSITIONS` graph (no jumping straight to REPLIED, no leaving
+  CLOSED), logs an `event` row on every hop, and — only for an explicit
+  do-not-contact `closed_reason` (`declined_do_not_contact`/
+  `user_opted_out`) — auto-adds the channel to `suppression`. A plain
+  rejection or no-reply does NOT suppress; that's not consent withdrawal,
+  and conflating the two would be a real bug (silently blocking a future
+  legitimate contact at that company).
+- **Sent/reply detection via `gmail.readonly`** — `detect_sent_via_gmail()`
+  and `check_for_replies()` only ever call `messages()`/`threads()` GET,
+  never send/modify/delete. Detecting "sent" works because Gmail keeps the
+  same message id across the draft→sent transition, just drops the DRAFT
+  label and adds SENT — captured now at draft-creation time via two new
+  `outreach` columns (`gmail_message_id`, `gmail_thread_id`, added by
+  `outreach_store._migrate_add_columns()`, and `outreach.create_gmail_draft()`
+  /`draft_outreach()` updated to populate them). `mark_sent()` is always
+  available as the manual path too — required for the `.eml` fallback rows,
+  which have no Gmail ids to detect against at all. Reply detection reads a
+  thread's messages and flags one not From the account's own address; it
+  deliberately does NOT classify sentiment (interview vs. rejection) — same
+  human-judgment boundary as A8's `specific_fact`, just logs the snippet via
+  `event` so Mehul reads it and calls `update_outreach_state()` himself.
+- **Follow-ups** (`schedule_followup()`/`record_followup_sent()`/
+  `due_followups()`) — bounded by `ratelimit.MAX_FOLLOWUPS_PER_THREAD` (F4,
+  already existed, now actually wired to something). `record_followup_sent()`
+  never sends anything itself — same submission boundary as the rest of the
+  repo, it's called *after* a human follow-up went out.
+- **The 30-day weight refit** (`refit_owns_req_likelihood()`) — the piece
+  `authority_graph.py`'s `owns_req_likelihood()` docstring has been pointing
+  at since A3 ("needs A9 with n>=20, per master prompt §9"). Same two hard
+  rules as `feedback.py`'s learning loop: **never auto-applies** (returns a
+  proposal dict; `authority_graph.NODE_TYPE_BASE_LIKELIHOOD` is never
+  written by this function) and **never concludes below n>=20** real
+  outcomes, or below 4 samples for any individual node type — reports the
+  honest shortfall instead. Per-type reply rate vs. base prior, nudge capped
+  at ±0.25 absolute (additive, not relative — these are already 0-1
+  probabilities, not weights that must sum to a total like `feedback.py`'s
+  do). `REFIT_MIN_AGE_DAYS = 30` — a still-open SENT_BY_USER thread only
+  counts as a negative (no-reply) signal once it's been open 30+ days; a
+  fresh send isn't evidence of anything yet.
+- **17 new smoke-test checks** (`career_agent_smoke_test.py` §8, 88/88 total
+  pass) cover the transition graph (including the terminal-state and
+  skip-a-step refusals), the do-not-contact-only suppression rule, the F4
+  follow-up cap, and the refit's honest-shortfall path plus its math (bounds,
+  cap, non-mutation of the real priors) against a synthetic fixture — **not**
+  against real outcomes, because there are none yet (see below).
+- **Not run against anything real yet, and correctly so**: `refit_
+  owns_req_likelihood()` against the live `career_agent.sqlite3` reports
+  "0/20 real outreach outcomes" right now — there is no live Gmail
+  sent/reply detection to test either, since that also needs a real sent
+  outreach to exist. This is the expected state until a real contact and a
+  real send happen; don't read "0 outcomes" as a bug the next time this is
+  checked.
+
+**✅ A8 outreach composer built AND live-verified against a real Gmail
+account.** Mehul created a new
+personal Gmail account (`mehul.96.mit@gmail.com`) specifically for this.
+
+**New files:**
+- `gmail_auth.py` — OAuth flow (scopes: `gmail.compose` + `gmail.readonly`
+  only, never send — SCOPES is the only place scopes are defined, and the
+  F1 grep test checks this file too). Token cached at
+  `~/.career_agent/token.json`, credentials at `~/.career_agent/
+  credentials.json` — both outside the repo entirely, so F7 (never
+  committed) is structurally guaranteed, not just gitignored. `os.chmod`
+  0600 is applied best-effort with an honest printed caveat that Windows
+  NTFS ACLs don't actually map to POSIX chmod semantics — don't claim a
+  permission guarantee the OS can't back up.
+- `outreach.py` (A8) — `check_preconditions()` enforces every §8 gate
+  (conflict-of-interest → `MANUAL_REVIEW_ONLY` event + hard stop;
+  `consent_basis` present; channel confidence ≥0.6; not suppressed; F4
+  caps via `ratelimit.py`; for company-centric/no-job outreach specifically,
+  `owns_req_likelihood ≥0.6` AND `warm_path_distance ≤2` — a real job_id
+  bypasses that last pair, matching §8's actual distinction between cold
+  company-centric outreach and outreach against a known open req).
+  `validate_composition()` enforces the mechanical gates only (specificity
+  field present, subject ≤8 words, body ≤150 words) — it deliberately does
+  NOT generate the thesis or the specific-fact itself; see the module
+  docstring for why that's a human/LLM judgment call this code shouldn't
+  fake. `create_gmail_draft()` calls `drafts().create()` only, never
+  `.send()`. `.eml` fallback writes to `out/drafts/` (gitignored) when no
+  Gmail service is passed or Gmail refuses.
+
+**Live-verified, not just unit-tested**: ran the real OAuth consent flow,
+confirmed `getProfile()` returns `mehul.96.mit@gmail.com`, and created one
+real test draft via `create_gmail_draft()` (addressed to Mehul himself,
+labeled "TEST DRAFT - safe to delete", confirmed via `drafts().list()`
+before handing back to him to delete). 61/61 smoke tests pass (14 new for
+A8) — DNS-dependent tests (`has_mx_record`) are occasionally flaky against
+live lookups, not a code bug; a failure isolated to those and clearing on
+re-run is expected, see `career_agent_smoke_test.py`'s docstring.
+
+**OAuth setup hit two real snags worth remembering:**
+1. Driving Google Cloud Console via browser automation tripped Google's own
+   bot-detection twice (`"Google has temporarily blocked your account...
+   due to excessive automated requests"`) — stopped immediately both times
+   per the hard "never bypass bot-detection" rule, and handed the Cloud
+   Console clicking-through back to Mehul to do himself in his own browser.
+   Only the final `gmail_auth.py` script run (opens Mehul's own regular
+   desktop browser for a normal consent screen, not Cloud Console
+   automation) was safe to run directly.
+2. First consent attempt failed with `403 access_denied` because the
+   project's OAuth consent screen was still in "Testing" mode and Mehul's
+   account wasn't yet on the **Test users** list. Also worth knowing: this
+   project is on Google's newer "Google Auth Platform" UI
+   (`console.cloud.google.com/auth/...`), where Test users lives under the
+   **Audience** tab — not the single "OAuth consent screen" page the
+   original master prompt's instructions assumed. Once added there, the
+   very next run succeeded immediately.
+
+**What's still not built:** A9's CRM/calibration loop (tracking outreach
+outcomes, reply detection via `gmail.readonly`, the 30-day weight-refit).
+Also, as of this session there are still ZERO real contacts in the system
+(A5's honest research-pass result) — A8 is proven and ready, but has
+nothing real to draft against yet until either a `user_existing_
+relationship`/`user_network_referral`/`inbound_recruiter` contact is
+supplied manually, or a future job posting yields a genuine
+`ats_apply_by_email`/`job_post_listed_contact`.
 
 **🔁 READ THIS BEFORE DIAGNOSING ANY "the pipeline stopped running" REPORT
 (2026-08-09).** It has now been reported twice — 2026-08-05 and 2026-08-09 —
