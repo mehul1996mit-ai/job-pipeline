@@ -123,8 +123,14 @@ def freshness_banner():
         except ValueError:
             sync_line = f"Last auto-sync check: {detail}"
     except OSError:
-        sync_line = ("No auto-sync log yet — dashboard_watchdog.ps1 may not "
-                     "have run since the sync step was added.")
+        # No log file. On Streamlit Community Cloud that is simply normal —
+        # it deploys from the repo itself, so it is current by construction
+        # and there is no local clone to sync. Only worth flagging when the
+        # data is ALSO old, which the age check below already handles.
+        sync_line = ("" if age <= 1 else
+                     "No auto-sync log — if this is the local dashboard, "
+                     "dashboard_watchdog.ps1 has not run since the sync step "
+                     "was added.")
 
     # The watchdog runs every 5 min. If its own heartbeat is older than ~20,
     # the thing keeping this clone current is itself down — which is exactly
