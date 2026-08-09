@@ -4,7 +4,299 @@ Read this file first in any new session on this project. It has the
 current status; `README.md` has full architecture/setup detail and
 `GCC_COVERAGE_GUIDE.md` has the manual-application layer.
 
-## STATUS (last updated 2026-08-02)
+## STATUS (last updated 2026-08-09)
+
+**🔁 READ THIS BEFORE DIAGNOSING ANY "the pipeline stopped running" REPORT
+(2026-08-09).** It has now been reported twice — 2026-08-05 and 2026-08-09 —
+and **both times the pipeline had run successfully every single day.** What
+had actually happened both times: this LOCAL clone was 4 commits behind
+`origin/main`, so `data/job_queue_*.csv` topped out at an old date and the
+local dashboard (which reads local files) looked dead. A stale clone and a
+dead pipeline were indistinguishable from the dashboard. Actual run history
+on 2026-08-09 was 18/18 consecutive successful days.
+
+**So: check `gh run list --workflow=daily_job_scan.yml` FIRST, before
+touching any code.** If runs are green, the pipeline is fine and the problem
+is local sync — do not "fix" the workflow.
+
+Three things were changed so this cannot silently recur:
+1. **`dashboard_watchdog.ps1` now fast-forwards the clone** (`git fetch` +
+   `git merge --ff-only origin/main`) on the same 5-minute Task Scheduler
+   job that already restarts Streamlit, and writes its outcome to
+   `dashboard_sync.log`. `--ff-only` is load-bearing: it can only move the
+   clone forward, so it can never overwrite local commits or unsaved
+   `match_feedback`/`applied` edits the dashboard wrote into a queue CSV. A
+   refused merge is reported, never auto-resolved — losing hand-entered
+   ratings to an automatic merge would be worse than showing stale data.
+2. **`streamlit_app.py` shows a data-freshness banner above the tabs on
+   every page** (`freshness_banner()`): newest queue date, its age, and the
+   sync heartbeat. Green when current; a loud red block when the data is 2+
+   days old OR the watchdog's own heartbeat is >20 min stale — that second
+   condition matters because a dead syncer otherwise renders identically to
+   a healthy one. The red block explicitly says a stale clone does NOT mean
+   the pipeline failed, and links Actions + the hosted dashboard to check.
+3. Two real bugs were caught in that banner only by testing it rather than
+   assuming: PowerShell's `-Format o` emits 7-digit fractional seconds and
+   `Set-Content -Encoding utf8` (PS 5.1) prepends a **BOM** — each one made
+   `datetime.fromisoformat()` raise, silently killing the "N min ago"
+   heartbeat and making a dead watchdog look healthy. Fixed by writing
+   `yyyy-MM-ddTHH:mm:sszzz` and reading `utf-8-sig`. **If you touch that
+   log's format, re-test the parse — this exact failure is invisible.**
+
+**Cron delay fix from 2026-08-05 measurably worked** (verify before changing
+it again). `daily_job_scan.yml` moved from `"0 3 * * *"` to `"17 3 * * *"`
+and the watchdog from `"0 5 * * *"` to `"39 5 * * *"`, on the theory that
+GitHub queues every repo requesting the same top-of-hour minute. Observed
+start times since: 08-06 11:39 UTC, 08-07 07:57, 08-08 05:31, 08-09 05:55 —
+i.e. the delay fell from a consistent 8–10h down to ~2.5h. Not eliminated,
+and GitHub gives no SLA on `schedule:` at all, so **the honest ceiling here
+is "runs daily, lands mid-morning IST," not "runs at 08:47 IST sharp."** The
+only way to a hard guarantee is triggering from outside GitHub Actions (an
+external cron service calling the GitHub API with a PAT) — deliberately NOT
+built: it needs a long-lived credential Mehul would have to create and hold,
+to solve a problem that has not actually occurred in 18 days.
+
+**Local Windows scheduled tasks are NOT a reliable backstop for anything
+critical** — a one-off verification task registered for 2026-08-06 failed
+with `0x800710E0` (operator/administrator refused) and produced nothing.
+They only run while logged in, and can be refused silently. Fine for
+convenience work like the dashboard sync above (if the machine is off you
+are not reading the dashboard anyway); not fine as the thing standing
+between you and a missed run.
+
+**✅ A5 contact resolution built.** New file `contact_resolution.py` — the
+validation pipeline that has to pass BEFORE `outreach_store.
+insert_contact_channel()` (the F2 gate, built in the 2026-08-04 P0 session)
+ever gets called: RFC-5322-shaped syntax check, MX-record lookup (DNS only —
+never an SMTP handshake/RCPT TO probe, per F6), domain-match against the
+company's own domain or a documented subsidiary (hard reject if neither —
+added `company.domain` column + `dnspython` dependency, both new this
+session), suppression-list check, case-insensitive dedupe, and a documented-
+prior confidence score (base rate per `consent_basis` type, +/- domain
+match, +corroboration, -staleness after 180 days). Every rejection logs a
+`NO_CONSENTED_CONTACT` event rather than silently dropping. 47/47 smoke
+tests pass (13 new for A5).
+
+**Real research pass against the 7 already-verified A3 nodes (5 companies:
+PhonePe, Razorpay, Cashfree Payments, Pine Labs, Setu, IIFL Finance) found
+ZERO consented contacts — and that's the correct, expected result, not a
+gap.** Checked two automatable routes: (1) job_pipeline's own already-
+discovered JD data for these companies — no apply-by-email addresses exist
+in any Greenhouse/Lever posting (expected; ATS platforms don't publish
+those), (2) each company's own careers/contact page for a published
+general inbox. Two leads surfaced by search (`jobs@razorpay.com`,
+`careers@cashfree.com`) — **both failed direct verification**: Razorpay's
+actual contact page lists real named PR contacts (Hepsibah Rozario, Anu
+Saraswat, etc.) and a PR-only inbox, no `jobs@` address at all; Cashfree's
+own careers page explicitly says "email us your resume" without ever
+giving an address. Same "verify the primary source, not the search
+summary" discipline as the Fibe catch (2026-08-05) and the Tata Capital
+non-add — a third confirmation this matters, not a one-off.
+
+**Bottom line**: A5's mechanism is real, tested, and ready to fire the
+moment a legitimate consent_basis route produces a candidate — this session
+just didn't find one, which matches the master prompt's own framing exactly
+("the absence of a contact is a valid, expected outcome"). The remaining
+5 of 7 consent_basis types (`user_existing_relationship`,
+`user_network_referral`, `inbound_recruiter`, `portal_opt_in_channel`, and
+effectively `job_post_listed_contact`/`ats_apply_by_email` beyond what
+job_pipeline already discovers) are inherently Mehul-supplied, not
+automatable — that's F2's design, not a gap to close.
+
+**Second same-session follow-up (2026-08-05) — SEBI-filing route tried as requested,
+partially works, 1 more node found (7 total, 5 companies).** Mehul asked to
+pursue RBI/SEBI/MCA filing coverage for the 19 companies (mostly large
+regulated NBFCs/insurers) that came up empty in the first pass (see entry
+below). Findings, precisely:
+- **RBI's NBFC register**: no executive names at all, registration status
+  only. Not useful for this purpose, don't retry.
+- **MCA filings**: Director-level only (board, not function heads). Same gap
+  as company "leadership" pages already hit. Not useful for this purpose.
+- **SEBI LODR "Senior Management" disclosure**: real regulatory requirement,
+  but hits two separate walls in practice — (a) the quick-access web pages
+  for it usually only surface Board+CFO/Company Secretary, not the fuller
+  functional list (confirmed on Muthoot Finance), and (b) the actual annual
+  report PDF that has the full Schedule V table is often a **scanned/
+  image-based PDF with no extractable text** (confirmed on Cholamandalam,
+  7.6MB, no OCR available in this environment). This is a real tooling
+  limit, not a discovery-effort gap.
+- **What actually worked**: SEBI Regulation 30 "material event" disclosures
+  — the specific one-off filings companies make for individual KMP/Senior
+  Management *appointments* (not the annual consolidated list) are
+  sometimes indexed directly by search and, critically, the company then
+  often publishes a matching bio page on their own site. This is how **IIFL
+  Finance (Vinay Agrawal, Business Head - Loan Against Property)** was
+  confirmed — found via a Reg 30 appointment search, then verified against
+  IIFL's own dedicated bio page (`iifl.com/finance/about-us/leaders/
+  management/vinay-agrawal`), a real `company_leadership_page` source.
+  **Tata Capital had the same pattern of lead (2 new CBOs, Reg 30, May
+  2026) but could NOT be confirmed** — the specific BSE filing PDF 404'd and
+  Tata Capital's own management-team page returned HTTP 406 — so it was
+  correctly left out despite a plausible-sounding search summary. Angel
+  One's only current CPO-related news was a **resignation** (Ankit Rastogi,
+  leaving Aug 2026) — correctly not added.
+- Fixed another live classifier gap: `authority_graph.py`'s
+  `OWNER_TITLE_MARKERS` didn't include "business head" (a common Indian BFSI
+  P&L-owner title pattern with no "chief"/"head of"/"director" in it), and
+  `FUNCTION_KEYWORDS["partnerships"]` didn't include "business head"/"chief
+  business officer" — both fixed, `career_agent_smoke_test.py` still 34/34.
+
+**Bottom line for future sessions**: the SEBI Reg-30-appointment-then-
+verify-on-company-bio-page pattern is real and worth repeating per company,
+one appointment search at a time — it's just slow (one company at a time,
+most still come up empty) and cannot be sped up by trying to read full
+annual-report PDFs (OCR gap) or the RBI/MCA registers (wrong data entirely).
+7 nodes / 5 companies is genuinely where this methodology caps out without
+new tooling (OCR, or a paid corporate-data API) or manual LinkedIn lookups
+Mehul does himself and hands over via `add_manual_node()`.
+
+**✅ First same-session follow-up — node-discovery research pass run against
+25 companies, 6 real nodes written.** The entry below says "0 authority nodes
+yet ... is the correct, honest output" — that was true right after A3's code
+landed, before this research pass; it's stale now. Ran a manual (not
+automated — see the module docstring, this is real per-company web research
+using WebSearch/WebFetch, not a scraper) pass against A2's top 25 companies
+by relevance score (swapped out Bajaj Finance — conflict-of-interest, no
+outreach possible there regardless — and the meaningless alphabetical tail
+of 0-score ties, for better-known companies across categories).
+
+**Result: 6 verified nodes across 4 companies**, all traced to an allowed
+source (see `policy/authority_node_sources.yaml`) with a real URL —
+PhonePe (Neeraj Jain, Head of Product), Razorpay (Khilan Haria CPO + Apuarv
+Sethi CMO), Cashfree Payments (Vijay Ravisekar, VP Product Management), Pine
+Labs + Setu (Vijeth Pandit, CPO of both — one verified byline naming both
+companies). 19 of 25 companies came up empty against a real primary source —
+expected and reported honestly, not silently skipped.
+
+**Real finding worth remembering for the next research pass:** consumer
+fintech startups (CRED, Razorpay, PhonePe, Pine Labs, Cashfree) publish
+named product/function executives in press releases and blog bylines;
+traditional regulated NBFCs/insurers/brokers (Tata Capital, Cholamandalam,
+Muthoot Finance, IIFL Finance, Angel One, Go Digit, Policybazaar, Acko) do
+not — their public sites only name CEO/MD/Board/CFO for governance
+disclosure, never product-function heads. This pass's methodology (leadership
+pages, press releases, blog bylines) essentially cannot find nodes for that
+second group. RBI/SEBI/MCA regulatory filings — not yet attempted, needs
+real filing-database access — are the more promising next avenue
+specifically for the large-NBFC segment of the allowlist.
+
+**One integrity catch during the pass, worth noting as a standing risk:** a
+WebSearch AI-summary claimed Fibe's Chief Product & Analytics Officer was
+"Balakrishnan Narayanan," but the actual regulatory filing it cited
+(`earlysalary.in/.../manager-details/`) named entirely different people when
+fetched directly. **WebSearch's summary was simply wrong** — always fetch
+the actual cited primary source before writing an authority_node; never
+write from a search summary alone, even when it sounds confident and cites
+a URL.
+
+Two classifier gaps found and fixed live during the pass (both in
+`authority_graph.py`'s `FUNCTION_KEYWORDS`): "Chief Marketing Officer" and
+"VP - Product Management" weren't matching (`FUNCTION_KEYWORDS["growth_marketing"]`
+needed "chief marketing officer"/"cmo"; `["product"]` needed "product
+management" — the "manager" vs "management" wording gap). Fixed; watch for
+more title-wording gaps as more companies get researched — this classifier
+is still narrow.
+
+**🟡 Session wrap-up 2026-08-05 — Career Agent A3 hiring-authority graph
+built (P0 + A2 were 2026-08-04).** Continues the same in-place extension of
+job_pipeline (see 2026-08-04 entry below for why, still the live decision).
+
+**Built and tested this session** (`career_agent_smoke_test.py`, 30/30 pass):
+- `outreach_store.py` — added `company.size_band`/`headcount_estimate`
+  columns (idempotent migration via `_migrate_add_columns()`, safe against
+  the DB file A2 already created), and `insert_authority_node()` — the sole
+  write path for `authority_node`, gated on `source` being one of the 6
+  values in the new `policy/authority_node_sources.yaml` (company leadership
+  page, press release, regulatory filing, conference speaker list, published
+  byline/podcast, or `user_manual_entry`). No LinkedIn scraping path exists
+  anywhere in this codebase — that's enforced by this being a closed
+  allowlist, not a comment.
+- `policy/network.yaml` — Mehul's own warm-path map (person → distance/via),
+  currently empty (`people: []`). **Read-only input, never written or
+  inferred by code** — `authority_graph.warm_path_distance()` only looks
+  values up here; there is no social-graph traversal anywhere. Unlisted
+  people default to distance 2 ("same sub-sector, plausible cold-but-
+  relevant"), not 3 ("no path") — every company reaching this graph already
+  came through A2's BFSI/fintech-targeted list, so sub-sector adjacency
+  holds by construction unless network.yaml says otherwise.
+- `authority_graph.py` (A3) — classifies a title into a function
+  (product/business_analysis/partnerships/program_project/growth_marketing)
+  and a node type (function_owner > hiring_manager > ta_lead_function >
+  generic_ta, the master prompt's priority-by-req-ownership reframe, not
+  title alphabet), scores `owns_req_likelihood` (documented priors, not yet
+  fitted — needs A9 with n≥20 real outcomes per §9), and writes through
+  `outreach_store.insert_authority_node()`. `add_manual_node()` is the one
+  source Mehul can use directly today.
+  **What this module does NOT do: discover people.** The other 5 allowed
+  sources (leadership pages, press releases, filings, speaker lists,
+  bylines) need real per-company research nothing here automates yet — `0
+  authority nodes yet` is the correct, honest output of `python
+  authority_graph.py` right now, not a bug.
+
+**Not built yet (next session):** A5 contact resolution (the F2 resolver —
+`insert_contact_channel()` exists but nothing calls it with real discovered
+contacts), A8 Gmail outreach composer (OAuth + `.eml` fallback for the
+`mibdu.org` Workspace-admin-block case), the node-discovery research step
+for A3 (turning "0 nodes" into real function-owner names via the 5 public
+sources), and the 4 pending A2 signals (cluster-fit, sub-sector,
+size/geography, growth). `company.size_band`/`headcount_estimate` are also
+still NULL for every company — nothing populates them yet, so A3's
+size-band modifier in `owns_req_likelihood()` is inert until that lands.
+
+**🟡 Session wrap-up 2026-08-04 — Career Agent P0 guardrails + A2 company
+targeting built, extending job_pipeline in place (not a new repo).** A
+separate master prompt asked for a 9-agent "Career Agent" system (company
+targeting → hiring-authority graph → contact resolution → Gmail-draft
+outreach → CRM/calibration) as a brand-new `career_agent/` repo. Checked
+first and found job_pipeline already implements, live-tested, most of what
+that spec calls A1/A4/A6/A7/A9 (CV parsing, job discovery, 3-layer scoring,
+tailoring with a deviation gate, and the feedback/calibration loop) — so
+building a parallel repo would have re-implemented ~2500 lines of debugged
+code and created a 4th place scoring logic could drift (job_pipeline +
+2 extension forks already have that problem per the master prompt's own
+§13 mirror-discipline note). Decision, confirmed with Mehul: extend
+job_pipeline in place; scope this session to P0 + one real agent (A2),
+checkpoint, continue A3/A5/A8 next session.
+
+**Built and tested this session** (`career_agent_smoke_test.py`, 18/18 pass,
+`python career_agent_smoke_test.py`):
+- `policy/company_allowlist.yaml` — the 150-company guaranteed-include floor
+  (147 after documented dedup), `Bajaj Finance` flagged
+  `conflict_of_interest_companies` (Mehul's current employer — must never be
+  auto-drafted once A8 exists, only ever manual-review).
+- `policy/contact_allowlist.yaml` — the 7 valid `consent_basis` values (F2's
+  source of truth).
+- `outreach_store.py` — new SQLite store (`data/career_agent.sqlite3`, WAL,
+  gitignored/rebuildable) for `company`/`authority_node`/`contact_channel`/
+  `outreach`/`event`/`suppression`. This file is the ONLY place permitted to
+  INSERT into those tables — `insert_contact_channel()` is the F2 gate
+  (raises on missing/invalid `consent_basis` before the DB's own NOT NULL
+  constraint would), enforced at both the Python and schema level.
+- `ratelimit.py` — F4 caps (20 drafts/day, 21-day per-company cooldown, 2
+  follow-ups) clamped in code so `config.yaml` can lower them but never raise
+  them past the ceiling.
+- `company_targeting.py` (A2) — force-includes every allowlist company
+  (`source_floor='user_allowlist'`, exempt from the DORMANT cap), then scores
+  every company. **Only the `hiring_activity` signal is real** — it reads
+  job_pipeline's own `data/seen_jobs.json` directly (no re-discovery) and
+  counts reqs per company in the trailing 90 days. The other 4 signals from
+  the master prompt (cluster-business-fit, sub-sector match, size band,
+  geography, growth signal — 80% of the spec'd weight) have **no data source
+  built yet** and deliberately contribute 0 rather than a fabricated midpoint
+  — `relevance_explain_json.pending_signals` lists them so this is visible,
+  not silently wrong. Run: `python company_targeting.py`.
+- Standing regression test for F1 (`messages/send`/`gmail.send` grep) is in
+  place now even though A8/Gmail doesn't exist yet — it'll catch a violation
+  the moment outreach.py is written next session.
+
+**Not built yet (next session):** A3 hiring-authority graph (needs
+`network.yaml` for warm-path distance — user-maintained, never scraped), A5
+contact resolution (the F2 resolver itself — `insert_contact_channel()`
+exists but nothing calls it with real discovered contacts yet), A8 Gmail
+outreach composer (needs OAuth setup + the `.eml` fallback for the
+`mibdu.org` Workspace-admin-block scenario), and the 4 pending A2 signals
+above. `career_agent.sqlite3` is gitignored and fully rebuildable by
+re-running `company_targeting.py` — don't hand-edit it.
 
 **✅ Session wrap-up 2026-08-02 — merged pipeline/browser status tab built
 and live-verified; extension review-before-Submit UX built; a fully silent

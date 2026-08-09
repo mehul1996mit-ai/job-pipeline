@@ -10,3 +10,11 @@ streamlit_out.log
 streamlit_err.log
 # Regenerated on every Status-tab render (streamlit_app.py) — not source.
 static/jt_status_data.json
+# Career Agent's SQLite store: fully rebuildable from policy/company_allowlist.yaml
+# + data/seen_jobs.json by re-running company_targeting.py — not source, and a
+# binary file would just churn the git history on every run.
+data/career_agent.sqlite3*
+
+# watchdog auto-sync status (local runtime state, not code)
+dashboard_sync.log
+cron_delay_check.log

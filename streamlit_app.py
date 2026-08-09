@@ -78,6 +78,96 @@ def apply_bridge_markdown(url: str, config: dict) -> str:
     return f"[Open job posting]({url})  ·  [**Apply →**]({apply_url}){badge}"
 
 
+# ------------------------------------------------------ data-freshness banner
+# WHY THIS EXISTS (2026-08-09). The pipeline runs in GitHub Actions and
+# commits each day's queue back to origin/main; this dashboard reads LOCAL
+# files. Nothing used to pull, so the clone drifted silently — and twice
+# (2026-08-05 and 2026-08-09) a clone sitting 4 days behind was reported as
+# "the pipeline stopped running" when Actions had actually succeeded every
+# single day. A stale clone and a dead pipeline looked identical from here.
+# They must never look identical again, so the age of the data is stated
+# outright on every page instead of being inferred from an empty-looking
+# queue. dashboard_watchdog.ps1 now fast-forwards the clone every 5 minutes;
+# this reports whether that is actually working rather than assuming it is.
+def freshness_banner():
+    from datetime import date as _fd, datetime as _fdt
+    queues = sorted(glob.glob(str(DATA / "job_queue_*.csv")))
+    if not queues:
+        st.error("**No queue data in this clone at all.** Nothing has been "
+                 "pulled or generated yet — check the pipeline on GitHub "
+                 "Actions before assuming the scan is broken.")
+        return
+
+    newest = Path(queues[-1]).stem.replace("job_queue_", "")
+    try:
+        age = (_fd.today() - _fd.fromisoformat(newest)).days
+    except ValueError:
+        return
+
+    # Read what the watchdog's last sync attempt actually did. Its absence is
+    # itself informative — it means the watchdog isn't running this code yet.
+    sync_line, sync_age_min = "", None
+    try:
+        # utf-8-sig, not utf-8: Windows PowerShell 5.1's `Set-Content
+        # -Encoding utf8` always prepends a BOM, and a leading ﻿ makes
+        # datetime.fromisoformat() raise — which silently cost the "N min
+        # ago" heartbeat reading (caught 2026-08-09). Same reason the queue
+        # CSVs are read utf-8-sig throughout this file.
+        raw = (ROOT / "dashboard_sync.log").read_text(
+            encoding="utf-8-sig").strip()
+        stamp, _, detail = raw.partition("  ")
+        try:
+            sync_age_min = int((_fdt.now().astimezone()
+                                - _fdt.fromisoformat(stamp)).total_seconds() // 60)
+            sync_line = f"Last auto-sync check: {sync_age_min} min ago — {detail}"
+        except ValueError:
+            sync_line = f"Last auto-sync check: {detail}"
+    except OSError:
+        sync_line = ("No auto-sync log yet — dashboard_watchdog.ps1 may not "
+                     "have run since the sync step was added.")
+
+    # The watchdog runs every 5 min. If its own heartbeat is older than ~20,
+    # the thing keeping this clone current is itself down — which is exactly
+    # the failure that must not look healthy.
+    stale_watchdog = sync_age_min is not None and sync_age_min > 20
+    if stale_watchdog:
+        sync_line += ("  ⚠️ auto-sync watchdog looks STOPPED (expected every "
+                      "5 min) — check the JobPipelineDashboardWatchdog task.")
+    blocked = ("BLOCKED" in sync_line or "ERROR" in sync_line
+               or stale_watchdog)
+    # age 0 = today's scan already landed; 1 = normal before today's run
+    # commits (it lands mid-morning IST). 2+ means something is genuinely off.
+    if age <= 1 and not blocked:
+        st.caption(f"🟢 Newest queue: **{newest}** "
+                   f"({'today' if age == 0 else 'yesterday'}). {sync_line}")
+    else:
+        # Lead with whichever thing is ACTUALLY wrong. Data can be current
+        # while the syncer is dead (and vice versa); a banner that headlines
+        # "0 days old" on a watchdog fault sends you looking in the wrong
+        # place, which is most of what made the original problem expensive.
+        if age >= 2:
+            headline = (f"Newest queue in this clone is {newest} — "
+                        f"{age} days old.")
+        else:
+            headline = (f"Queue data looks current ({newest}), but the "
+                        f"auto-sync that keeps it that way is unhealthy — "
+                        f"it will go stale without warning.")
+        st.error(
+            f"⚠️ **{headline}**\n\n"
+            f"{sync_line}\n\n"
+            "**This does not by itself mean the pipeline failed.** It runs in "
+            "GitHub Actions, not on this machine — confirm there first:\n"
+            "- Runs: https://github.com/mehul1996mit-ai/job-pipeline/actions\n"
+            "- Always-current dashboard: https://job-1357.streamlit.app/\n\n"
+            "If Actions shows successful runs, only this local copy is behind: "
+            "run `git -C C:\\Claude\\job_pipeline merge --ff-only origin/main`. "
+            "If that refuses, you have local commits or unsaved queue edits "
+            "blocking it — resolve them by hand so no ratings are lost.")
+
+
+freshness_banner()
+
+
 # CV Match Copilot (Gemini)'s Chrome extension ID — needed to reach its
 # externally_connectable listener (background.js's jt.queryTracker handler,
 # added 2026-08-02) from this page's own JS. It's the extension's real
