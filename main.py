@@ -90,9 +90,18 @@ def main():
         """Full scoring stack for one job. Deterministic — no API calls — so
         it is safe to run on every listing and again after a full JD arrives."""
         jd_text = f"{j['title']} {j.get('description', '')}"
-        r = matcher.score_job(jd_text, cv.raw_text, structured_cv, config)
+        # title passed separately: seniority inference must read the TITLE's
+        # own wording, not stray "senior"/"director" mentions in the body.
+        r = matcher.score_job(jd_text, cv.raw_text, structured_cv, config,
+                              title=j.get("title", ""))
         j.update({
             "score": r["score"],
+            "exp_min_years": r["exp_min_years"],
+            "exp_max_years": r["exp_max_years"],
+            "exp_confidence": r["exp_confidence"],
+            "exp_verdict": r["exp_verdict"],
+            "exp_why": r["exp_why"],
+            "seniority_tier": r["seniority_tier"],
             "frozen_score": r["frozen_score"],
             "legacy_score": matcher.ats_score(jd_text, cv.keywords, config),
             "percentile": r["percentile"],
@@ -157,9 +166,15 @@ def main():
             before = j["score"]
             r = matcher.score_job(
                 f"{j['title']} {j.get('description', '')}", cv.raw_text,
-                structured_cv, config, llm_analysis=llm_analysis)
+                structured_cv, config, llm_analysis=llm_analysis,
+                title=j.get("title", ""))
             j.update({
                 "score": r["score"], "percentile": r["percentile"],
+                "exp_min_years": r["exp_min_years"],
+                "exp_max_years": r["exp_max_years"],
+                "exp_confidence": r["exp_confidence"],
+                "exp_verdict": r["exp_verdict"], "exp_why": r["exp_why"],
+                "seniority_tier": r["seniority_tier"],
                 "band": r["band"], "jd_difficulty": r["jd_difficulty"],
                 "must_coverage": r["must_coverage"],
                 "missing_must": r["missing_must"], "top_gaps": r["top_gaps"],

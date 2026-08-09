@@ -1,6 +1,23 @@
 # ------------------------------------------------------------------ profile
 profile:
   experience_years: 4          # used for experience-band overlap checks
+  # The most experience a posting may ASK for and still be worth surfacing.
+  # This is your ceiling, not a property of any job. Added 2026-08-09 after
+  # VP-titled roles kept reaching the digest: title is a useless seniority
+  # proxy (a bank "VP" is a ~6-10y IC, a startup "VP" is an exec), so
+  # seniority.py judges on the experience the posting REQUIRES instead.
+  comfort_max_years: 8
+  # How far above experience_years a stated floor may sit and still count as
+  # a reachable stretch rather than out of range.
+  stretch_years: 2
+  # Score penalty when a posting is judged over_senior. Deliberately large
+  # enough to push a typical 50-60 scorer under filters.min_score_to_tailor,
+  # so these stop consuming tailoring API calls and stop crowding the
+  # digest's top-N — but NOT a hard filter: the row stays in the CSV with its
+  # verdict visible. 51 of 86 reads are "inferred" (title wording, no stated
+  # number), and hard-deleting on a guess would hide the bank-style VP roles
+  # that genuinely are mid-level. Penalise, surface, let the human decide.
+  over_senior_penalty: 25
 
 # --------------------------------------------------------------- job search
 search:

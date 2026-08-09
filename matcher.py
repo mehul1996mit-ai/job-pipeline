@@ -30,6 +30,7 @@ from collections import Counter
 
 import calibrate
 import jd_analyst
+import seniority
 from aggregate import aggregate_score
 from cv_parser import keyword_set, tokenize, NOISE_WORDS
 from scoring_core import compute_match
@@ -163,8 +164,36 @@ def frozen_score(jd_text: str, cv_text: str, config: dict) -> dict:
                          domain_keywords=_domain_keywords(config))
 
 
+def _experience_verdict(title: str, jd_text: str, config: dict) -> dict:
+    """Seniority read for one posting (see seniority.py for the why).
+
+    Kept here rather than inside aggregate.py on purpose: this is a FILTERING
+    concern about whether the role is aimed at someone of your level, not a
+    measure of how well your CV matches its content. Folding it into the six
+    sub-scores would let a genuinely strong skill match quietly cancel out
+    "this role wants 12+ years", which is exactly the failure being fixed.
+    """
+    prof = config.get("profile", {}) or {}
+    band = seniority.extract_experience(title, jd_text)
+    verdict = seniority.judge(
+        band,
+        my_years=float(prof.get("experience_years", 0) or 0),
+        comfort_max=float(prof.get("comfort_max_years", 8) or 8),
+        stretch=float(prof.get("stretch_years", 2) or 2),
+    )
+    return {
+        "exp_min_years": band["min_years"],
+        "exp_max_years": band["max_years"],
+        "exp_confidence": band["confidence"],
+        "exp_evidence": band["evidence"],
+        "seniority_tier": band["seniority"],
+        "exp_verdict": verdict["verdict"],
+        "exp_why": verdict["why"],
+    }
+
+
 def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
-              llm_analysis: dict | None = None) -> dict:
+              llm_analysis: dict | None = None, title: str = "") -> dict:
     """Score one posting through every layer. Fully deterministic unless an
     `llm_analysis` is supplied (from the tailoring call, which already happens
     for the top-N jobs) — so this is safe to run on every listing.
@@ -190,8 +219,23 @@ def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
     gaps = calibrate.counterfactual_gaps(analysis, structured_cv, sm,
                                          agg_kwargs=agg_kwargs, limit=5)
 
+    # Seniority penalty. Applied to the FINAL score rather than as a seventh
+    # sub-score so it cannot be diluted by the weighting: a role aimed two
+    # levels above you is not partially disqualifying. Deliberately a penalty
+    # and not a filter — the row still reaches the CSV with its verdict, but
+    # sinks below the digest top-N and below min_score_to_tailor, so it stops
+    # consuming tailoring calls. See config.yaml profile.over_senior_penalty.
+    exp = _experience_verdict(title or jd_text[:120], jd_text, config)
+    score = agg["score"]
+    if exp["exp_verdict"] == "over_senior":
+        penalty = float((config.get("profile", {}) or {})
+                        .get("over_senior_penalty", 25) or 25)
+        score = max(0, round(score - penalty))
+
     return {
-        "score": agg["score"],                 # structured — rank on this
+        "score": score,                        # structured — rank on this
+        "score_before_seniority": agg["score"],
+        **exp,
         "frozen_score": frozen["score"],
         "percentile": cal.get("percentile"),
         "band": cal.get("band"),

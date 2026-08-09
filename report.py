@@ -22,7 +22,20 @@ COLUMNS = ["applied", "applied_on", "match_feedback", "score", "title",
            "keywords_to_add_if_true",
            "fit_exact", "fit_partial", "fit_gaps",
            "outreach_note", "change_log", "honest_gap_note",
-           "missing_keywords", "description_snippet"]
+           "missing_keywords",
+           # Seniority read (2026-08-09). exp_confidence is the important one
+           # to look at alongside the verdict: "stated" came from the
+           # posting's own words, "inferred" is a guess from title wording.
+           "exp_verdict", "exp_confidence", "exp_required", "exp_why",
+           "description_snippet"]
+
+
+def _fmt_exp(lo, hi) -> str:
+    """Human-readable required-experience band for the CSV column."""
+    if lo is None:
+        return ""
+    lo = f"{float(lo):g}"
+    return f"{lo}+" if hi is None else f"{lo}-{float(hi):g}"
 
 
 def _row_for(j: dict) -> dict:
@@ -88,6 +101,11 @@ def _row_for(j: dict) -> dict:
                 "honest_gap_note": t.get("honest_gap_note", ""),
                 "missing_keywords":
                     ", ".join(j.get("missing_keywords", [])),
+                "exp_verdict": j.get("exp_verdict", ""),
+                "exp_confidence": j.get("exp_confidence", ""),
+                "exp_required": _fmt_exp(j.get("exp_min_years"),
+                                         j.get("exp_max_years")),
+                "exp_why": j.get("exp_why", ""),
                 # long enough for the UI's on-demand tailoring to work with
                 "description_snippet":
                     (j.get("description") or "")[:2000],

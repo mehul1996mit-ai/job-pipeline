@@ -577,5 +577,78 @@ check("Ashby secondaryLocations (list of objects) parses without crashing",
       len(_rows) == 1 and "Bengaluru" in _rows[0]["location"],
       f"({_rows[0]['location'] if _rows else 'no rows'})")
 
+# ===================== 11. SENIORITY / EXPERIENCE JUDGEMENT =================
+# STANDING GUARDS, not ordinary unit tests (same convention as the fairness
+# audit and acceptance regression above). Two properties must hold forever:
+#
+#  (a) COMPANY AGE IS NEVER READ AS A REQUIREMENT. Every string below is
+#      verbatim from a real 2026-08 posting. If one of these ever parses as a
+#      requirement, the pipeline starts silently hiding good jobs — fix the
+#      extractor, never the expectation.
+#  (b) AN INFERRED BAND NEVER MASQUERADES AS A STATED ONE. Acting on a guess
+#      from title wording and acting on the posting's own words are different
+#      levels of evidence, and config.yaml only hard-penalises on the verdict
+#      while the CSV shows the confidence — so the tiers must stay honest.
+print("\n== 11. SENIORITY / EXPERIENCE JUDGEMENT")
+import seniority as _sen
+
+_COMPANY_AGE = [
+    "P&G was founded over 180 years ago as a simple soap and candle company",
+    "With 45 years of experience and a presence across 10 countries, CAI combines",
+    "Kobie, a 35-year veteran of the loyalty industry",
+    "In March 2026, we delivered the largest month in our 11-year history",
+    "please consider applying for a maximum of 3 roles within 12 months",
+]
+for _txt in _COMPANY_AGE:
+    _b = _sen.extract_experience("Product Manager", _txt)
+    check(f"company-age text is not a requirement: '{_txt[:38]}...'",
+          _b["confidence"] in ("unknown", "inferred"),
+          f"(got {_b['confidence']} {_b['min_years']}-{_b['max_years']})")
+
+# Adzuna ships ranges with the separator stripped (verified against their live
+# API, 2026-08-09). "48 years" means 4-8 and must never be read literally.
+for _raw, _lo, _hi in [("Experience: 48 years", 4, 8),
+                       ("Experience: 810 Years", 8, 10),
+                       ("712 years of experience in partner management", 7, 12)]:
+    _b = _sen.extract_experience("Manager", _raw)
+    check(f"mangled range repaired: {_raw[:26]!r} -> {_lo}-{_hi}",
+          (_b["min_years"], _b["max_years"], _b["confidence"])
+          == (_lo, _hi, "repaired"),
+          f"(got {_b['min_years']}-{_b['max_years']} {_b['confidence']})")
+
+_b = _sen.extract_experience("Senior Technical Product Manager- Micro Lending",
+                             "Experience: 10 years NBFC / Fintech")
+check("a stated 10-year floor is over_senior at a 8-year ceiling",
+      _sen.judge(_b, 4.5, comfort_max=8)["verdict"] == "over_senior"
+      and _b["confidence"] == "stated")
+
+_b = _sen.extract_experience("Product Owner, VP", "support senior management")
+check("a bare VP is judged on its band CENTRE, not its floor",
+      _sen.judge(_b, 4.5, comfort_max=8)["verdict"] == "over_senior"
+      and _b["confidence"] == "inferred",
+      f"({_b['confidence']} {_b['min_years']}-{_b['max_years']})")
+
+_b = _sen.extract_experience("Product Manager", "4-6+ years of product management experience")
+check("a real stated range still reads as a good fit",
+      _sen.judge(_b, 4.5, comfort_max=8)["verdict"] == "good_fit"
+      and _b["confidence"] == "stated")
+
+check("no experience signal anywhere stays 'unknown', never a guessed number",
+      _sen.extract_experience("Product Manager",
+                              "Own the roadmap and work with design")["confidence"]
+      == "unknown")
+
+# The penalty must be a PENALTY, not a filter: the row survives to the CSV.
+_cfgp = dict(config)
+_cfgp["profile"] = {"experience_years": 4, "comfort_max_years": 8,
+                    "stretch_years": 2, "over_senior_penalty": 25}
+_r = matcher.score_job("Project Manager Experience : 11 years Mumbai",
+                       cv.raw_text, scv, _cfgp, title="Project Manager")
+check("over_senior costs score but still returns a scored row",
+      _r["exp_verdict"] == "over_senior"
+      and _r["score"] < _r["score_before_seniority"]
+      and _r["score"] >= 0,
+      f"({_r['score_before_seniority']} -> {_r['score']})")
+
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)
