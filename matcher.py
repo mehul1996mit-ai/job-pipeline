@@ -215,7 +215,6 @@ def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
         "weights": config.get("scoring", {}).get("weights") or None,
     }
     agg = aggregate_score(analysis, structured_cv, sm, **agg_kwargs)
-    cal = calibrate.calibrate_score(agg["score"], analysis)
     gaps = calibrate.counterfactual_gaps(analysis, structured_cv, sm,
                                          agg_kwargs=agg_kwargs, limit=5)
 
@@ -231,6 +230,15 @@ def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
         penalty = float((config.get("profile", {}) or {})
                         .get("over_senior_penalty", 25) or 25)
         score = max(0, round(score - penalty))
+
+    # Calibrated AFTER the penalty (2026-08-10 fix), not before. This was a
+    # real, reported bug: a job penalised to 34 for being over-senior still
+    # showed "64th percentile / competitive" because percentile was computed
+    # off the pre-penalty score — actively misleading, since "competitive"
+    # invites exactly the wrong conclusion about a role you're structurally
+    # not positioned for. percentile/band/note now all describe the SAME
+    # number as `score`, so the calibration block can never contradict it.
+    cal = calibrate.calibrate_score(score, analysis)
 
     return {
         "score": score,                        # structured — rank on this

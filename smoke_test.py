@@ -668,5 +668,19 @@ check("over_senior costs score but still returns a scored row",
       and _r["score"] >= 0,
       f"({_r['score_before_seniority']} -> {_r['score']})")
 
+# Real reported bug, 2026-08-10: percentile/band were calibrated off
+# score_before_seniority, so a job penalised down to 34 still showed "64th
+# percentile / competitive" -- actively misleading, since "competitive"
+# invites the reader to conclude the opposite of what the penalty found.
+check("percentile is calibrated off the FINAL (post-penalty) score, not the pre-penalty one",
+      _r["percentile"] == matcher.calibrate.calibrate_score(
+          _r["score"], _r["analysis"])["percentile"],
+      f"(got {_r['percentile']})")
+check("...and does NOT match what the pre-penalty score would calibrate to",
+      _r["percentile"] != matcher.calibrate.calibrate_score(
+          _r["score_before_seniority"], _r["analysis"])["percentile"],
+      f"(pre-penalty percentile would have been "
+      f"{matcher.calibrate.calibrate_score(_r['score_before_seniority'], _r['analysis'])['percentile']})")
+
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)
