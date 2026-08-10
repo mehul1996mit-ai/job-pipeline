@@ -633,6 +633,24 @@ check("a real stated range still reads as a good fit",
       _sen.judge(_b, 4.5, comfort_max=8)["verdict"] == "good_fit"
       and _b["confidence"] == "stated")
 
+# Missed live, 2026-08-10: "AVP" wasn't recognised as a title tier at all, so
+# "Sr AVP" fell through to the generic "senior" pattern (band 6-10, centre
+# exactly 8) and never crossed the ceiling. Real posting: Wells Fargo,
+# "Sr AVP- Project Manager", no stated years anywhere in the full 2000-char
+# JD (not a truncation case, a genuine title-tier gap).
+_b = _sen.extract_experience("Sr AVP- Project Manager",
+                             "About this role: Wells Fargo is seeking a Hybrid Markets PM")
+check("AVP is recognised as a senior BFSI/GCC grade, not generic 'senior'",
+      _sen.judge(_b, 4.5, comfort_max=8)["verdict"] == "over_senior"
+      and _b["confidence"] == "inferred" and _b["seniority"] == "avp",
+      f"({_b['confidence']} {_b['seniority']} {_b['min_years']}-{_b['max_years']})")
+check("a bare AVP (no Sr/Senior prefix) is caught the same way",
+      _sen.judge(_sen.extract_experience("AVP, Product Manager", "Own the roadmap"),
+                4.5, comfort_max=8)["verdict"] == "over_senior")
+check("AVP recognition doesn't swallow a plain Senior Product Manager",
+      _sen.judge(_sen.extract_experience("Senior Product Manager", "Own the roadmap"),
+                4.5, comfort_max=8)["verdict"] == "good_fit")
+
 check("no experience signal anywhere stays 'unknown', never a guessed number",
       _sen.extract_experience("Product Manager",
                               "Own the roadmap and work with design")["confidence"]

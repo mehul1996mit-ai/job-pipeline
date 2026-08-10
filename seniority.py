@@ -88,6 +88,14 @@ _PATTERNS = [
 
 # Seniority implied by title wording, used ONLY when no number exists.
 # Bands are deliberately wide — this tier is a hint, not a measurement.
+# ORDER MATTERS: checked top-to-bottom, first match wins. "avp" must sit
+# ABOVE "ic_senior" or a title like "Sr AVP" matches the generic "sr"/
+# "senior" pattern first (band 6-10) and the bank-grade signal is lost
+# entirely — this is a real miss found live (2026-08-10): "Sr AVP - Project
+# Manager" fell through to ic_senior, centred at exactly the 8y ceiling, and
+# never flagged as over_senior. AVP wasn't recognised as a title AT ALL
+# before this — same class of gap as bare VP below, just missed the first
+# time around.
 _TITLE_TIERS = [
     ("exec", re.compile(
         r"\b(chief|c[teifo]o\b|cxo|svp|evp|executive\s+vice|"
@@ -96,6 +104,15 @@ _TITLE_TIERS = [
     ("lead", re.compile(
         r"\b(lead|principal|staff|group\s+product\s+manager|\bgpm\b|"
         r"senior\s+manager|architect)\b", re.I), (8, 14)),
+    # AVP (Assistant Vice President) — a real, senior BFSI/GCC grade despite
+    # the "Assistant" wording; global banks (this exact posting is Wells
+    # Fargo, same category as State Street/Natwest/Citi already handled via
+    # bare VP) commonly require 7-12+ years for it. A "Sr"/"Senior" prefix on
+    # top doesn't widen the band further here — (7,13) already centres at 10,
+    # well past a typical comfort ceiling, so the extra modifier isn't needed
+    # to reach the right verdict and isn't modelled separately.
+    ("avp", re.compile(r"\bavp\b|assistant\s+vice\s+president", re.I),
+     (7, 13)),
     ("ic_senior", re.compile(r"\b(senior|sr\.?|ii+|advanced)\b", re.I), (6, 10)),
     ("ic_junior", re.compile(
         r"\b(junior|jr\.?|associate|trainee|intern|graduate|entry[\s-]?level|"
