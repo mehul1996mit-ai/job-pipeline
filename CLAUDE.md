@@ -2,8 +2,26 @@
 
 Read this file first in any new session on this project. It has the
 current status; `README.md` has full architecture/setup detail (including
-a new "Career Agent" section — read that first for A2/A3/A5/A8/A9) and
-`GCC_COVERAGE_GUIDE.md` has the manual-application layer.
+a "Career Agent" section — read that first for A2/A3/A5/A8/A9 — and an
+"Interview Prep Toolkit" section, read that first for anything about
+resume claims, interview questions, or the "🗂️ Interview Prep" dashboard
+tab) and `GCC_COVERAGE_GUIDE.md` has the manual-application layer.
+
+**Interview Prep Toolkit (2026-08-11) — Phase 1 (Preparation) is fully
+built and live-verified; Phase 2 (Practice — adaptive interviewer, live
+evaluation, mock interviews, readiness scoring) does not exist and was
+repeatedly, deliberately declined across four master prompts this session.**
+New files: `interview_store.py`, `interview_prep.py`, `interview_stories.py`,
+`interview_answers.py`, `interview_llm.py`, `interview_question_bank.py`,
+`interview_ui.py` (dashboard tab), plus `interview_smoke_test.py` and
+`answer_bank_smoke_test.py`. Read the README section first for the
+architecture table; the detailed entries below (search "Interview Prep" /
+"Answer Bank" / "Question Bank") have the full build history, every design
+call, and three real bugs found only by live-clicking the UI (a missing
+429 retry, an `st.rerun()` silently discarding writes, a process-switch
+that never switched) — worth reading before touching `interview_ui.py`.
+None of this touches the job pipeline, `career_agent.sqlite3`, or outreach
+in any way — separate database, separate tab, separate concern.
 
 **Career Agent's original 9-agent scope is now fully built (A2/A3/A5/A8/A9,
 all extending job_pipeline in place) — see the A9 entry directly below.**
@@ -19,6 +37,376 @@ contact is supplied (`user_existing_relationship`/`user_network_referral`/
 check with Mehul on sequencing rather than assuming.
 
 ## STATUS (last updated 2026-08-11)
+
+**🟢 Interview Prep & Practice toolkit — Phase 1 (preparation) built,
+Phase 2 (practice/evaluation) deliberately not started.** A separate master
+prompt asked for a 16-section interview-prep subsystem inside job_pipeline
+(claim extraction, JD gap mapping, story bank, an anti-noise evaluation
+engine, mock interviews, mastery/spaced-repetition, readiness, company/
+segment research). The prompt's own §2 argued for building a thin P0 slice
+through *both* phases first, specifically to de-risk the evaluation engine
+(its own words: "everything downstream is decoration on noise" if answer
+scoring isn't reliable). I raised that once; Mehul asked for Phase 1 built
+first regardless, then explicitly deferred to my judgment — so Phase 1 was
+built in full, Phase 2 (the evaluation engine, mock interview, mastery,
+readiness) was not started at all this session, not even as a stub.
+
+**New files**, all offline/zero-API-key by design — see the design decision
+below: `interview_store.py` (I2 — separate `data/interview_prep.sqlite3`,
+`INTERVIEW_DB_PATH` overridable, mirrors `outreach_store.py`'s pattern),
+`interview_prep.py` (§4.1–§4.6: candidate model, claim extraction, question
+trees, metrics defense, JD intake → `InterviewProcess`, prep-topic
+generation), `interview_stories.py` (§4.7: story bank, I3 fact-integrity
+check, I4 placeholder discipline, competency coverage-gap detection),
+`interview_smoke_test.py` (32 offline checks, all pass — `python
+interview_smoke_test.py`).
+
+**Design decision: all of Phase 1 is deterministic, zero LLM calls.** The
+master prompt implied generated content throughout; on inspection, every
+Phase 1 output is actually a mechanical transform of `resume_master.json`
+or the JD text — claim extraction is one `ResumeClaim` per bullet copied
+verbatim (metric/ownership/risk_level all regex-derived, not generated),
+the question tree and metrics-defense set are fixed templates instantiated
+per claim, and JD gap mapping reuses `jd_analyst.analyze_jd()` (already
+deterministic) + `skill_match.match_skill()`/`index_layers()` (already
+built, layered exact/alias/stem/phrase matching) rather than a new
+embedding stack. This is a real departure from the spec, not just an
+implementation detail: it means Phase 1 structurally cannot violate I3 (no
+model call exists that could assert an unsupported fact) and satisfies I6
+for the whole phase rather than just the tests. `tailor.py`'s fact-
+integrity validator (`rewrite_is_safe()`) turned out not to be directly
+reusable as I1/I3 implied — it's shaped specifically for rewritten-bullet
+pairs, not free text — so `interview_stories.check_fact_integrity()` is a
+new function applying the same discipline (every numeric value in a story
+field must trace back to a number literally present in
+`resume_master.json`) to the story-bank input shape instead.
+
+**Follow-up same session: LLM generation added back in, scoped to where it's
+actually load-bearing, free-tier only.** Mehul asked to use the master
+prompt's implied LLM generation "wherever it will be helpful, but only
+free." Pushed back once: the question tree and metrics-defense templates
+already do their job well and don't need a model call. The one place
+generation is genuinely additive is the story bank's "guided capture"
+(§4.7) — drafting a first-pass Situation/Task/Action/Result/Reflection
+narrative from a bare resume bullet is real value a template can't produce.
+New file `interview_llm.py`: reuses `tailor.py`'s gemini/groq call plumbing
+directly (both free-tier; **anthropic is deliberately excluded** — this
+repo's `tailor.anthropic_model` is a paid Opus model, not a free tier, and
+is never selected here regardless of `config.yaml`'s `tailor.provider`).
+Every generation function takes an injectable `call_fn`, so
+`interview_smoke_test.py` tests it with a fake double and needs zero API
+keys — 7 new checks, still fully offline. I3 is enforced exactly as
+designed: a fact violation (or an incomplete response) triggers ONE
+regeneration with a stricter reminder, and a second violation raises
+`InterviewFactIntegrityError` — never a silent pass, never a silently
+half-filled story. `interview_stories.draft_story_from_claim()` wires it to
+the store, going through the exact same `create_story()` I3/I4 path a
+manually-typed story would, so nothing generated bypasses the normal
+insert-time checks. **Live-verified against the real Gemini API same session** (I6 governs the
+*test suite* being offline, never the feature itself — the default
+`call_fn` always calls the real free-tier provider; only
+`interview_smoke_test.py` swaps in a fake double). First live call passed
+fact-integrity on attempt 1, no regeneration needed, correctly placeholdered
+the one genuinely unstated implementation detail — but the prose was
+noticeably passive/stilted ("were led... were led"), a real quality problem
+a fixture-only test would never have caught, since the model was
+over-correcting against the invent-nothing constraint. Fixed by tightening
+`STORY_DRAFT_PROMPT` to require first-person active voice explicitly ("I
+led...", never "was led"), re-verified live — output now reads as
+practiceable spoken material while keeping every fact and the placeholder
+discipline intact. All three smoke suites re-confirmed green after the
+prompt change.
+
+**Second follow-up same session — one real bug fixed, one more genuine LLM
+use added, both from re-reading my own code harder rather than new scope.**
+Mehul repeated the "make this tool best, choose accordingly" instruction as
+a direct check that I'd understood it as license to look for more value,
+not just confirm the prior turn. Found:
+- **A real bug**: `build_candidate_profile()`'s `differentiators` field was
+  dead code since I wrote it — always `[]`, with a comment saying the
+  caller should populate it from `resume_master.json["achievements"]`, but
+  nothing ever did. Real signal (Spotlight Award, two national
+  case-competition placements) was silently discarded. Fixed —
+  deterministic, not an LLM question, just an oversight. The `ON
+  CONFLICT... DO UPDATE` clause was also missing
+  `differentiators_json=excluded.differentiators_json`, so even a future
+  fix to populate it would have silently failed to persist on re-run; fixed
+  in the same edit.
+- **A second genuine LLM use**: prep-topic rationale ("why an interviewer
+  actually probes this, what a weak vs. strong answer signals"). Lower
+  fact-risk than story drafting — it reasons about a JD requirement or
+  claim generically, never a candidate-specific number — so the guard is
+  simpler: any digit in the output that isn't already in the topic's own
+  text is treated as invented and rejected (same one-regeneration-then-
+  hard-failure I3 pattern). New `interview_prep.enrich_topics_with_
+  rationale()` runs as a separate, optional pass AFTER topic generation —
+  §4.2's requirement that the topic list itself stay synchronous is
+  preserved; this only lazily backfills `prep_topic.rationale` (new
+  column) for rows that don't have one yet, so it's safe to call
+  repeatedly without re-spending calls. Live-verified against the real
+  Gemini API (not just the fake-double tests) — clean output, no
+  regeneration needed, no invented figures. 8 new offline checks
+  (fake-double coverage of the accept/reject/regenerate/skip-already-done
+  paths) plus the live call, all pass; `smoke_test.py` and
+  `career_agent_smoke_test.py` still green.
+
+**✅ Fifth master prompt (a full "World-Class UI/UX" redesign spec) — same
+navy/indigo "Linear × Notion × Stripe" direction declined a second time,
+two genuinely missing pieces built instead.** Mehul's own instruction this
+round: "don't accept everything, only do what's better than what we have
+built." The re-theme request repeats the previous UI prompt's ask almost
+verbatim — held the same position for the same reason (the case-file token
+system is tested, live, and matches this project's own original design
+brief's explicit instruction to avoid generic AI-SaaS defaults). Also
+skipped: the 4-screen onboarding wizard (the existing compact "+ New
+process" form already does the same job in fewer steps — building the
+wizard would be MORE ceremony, not less, which the spec's own philosophy
+argues against) and a standalone Resume Defense page (metrics defense
+nested under its claim is arguably better than a flat separate list — you
+see the defense right where the claim is). All of Phase 2's UI (interview
+room, AI interviewer avatar, mock setup, radar charts, follow-up survival,
+progress-over-time) still has no backend, so still nothing to build there.
+
+Two things WERE genuinely missing and got built:
+1. **Question Bank** (`interview_ui._question_bank_view()`) — until now,
+   questions lived in two disconnected areas (claim picker → question tree,
+   and a separate base-questions list) with no single place to see
+   everything, filter by category, or sort by priority. New expander
+   flattens claim_question + metric_defense (global per T§14) + this
+   process's base_question_bank selection into one filterable/sortable
+   table — a consolidation of existing data, not a new question source.
+   Live-verified: 240 rows for the ICICI Bank process, exactly matching
+   17 claims × 10 tree questions + 6 metric-bearing claims × 10 defense
+   dimensions + 10 base questions.
+2. **Fit rollup** (`interview_ui._fit_rollup()`) — the JD match data already
+   existed per-requirement (matched/partial/gap via `requirement_match`)
+   but nothing aggregated it into one number. Weighted by tier (must-have
+   counts 3x) into a single "Your fit against this JD: 43%" — explicitly
+   labeled as a rollup of existing calls, not a new judgment, so it doesn't
+   read as a fabricated score the way the declined "Interview Readiness:
+   74%" would have.
+
+**✅ Two genuinely new Phase-1 capabilities added, everything else in that
+huge fourth master prompt deliberately left out.** A fourth prompt
+("AI Interview Preparation & Practice OS") re-specified the whole product
+top to bottom, overlapping and partly conflicting with everything already
+built. First response to it was to start implementing it wholesale
+(company-research web-search engine, a parallel prioritization table) —
+Mehul stopped that directly ("think and do and don't blindly do
+everything"), which was the right call: most of it either duplicated
+`prep_topic`'s existing priority mechanism or was a real accuracy risk
+(this repo's own A3/A5 sessions hit real "WebSearch summary was simply
+wrong" incidents) that deserved its own careful session, not a rushed
+bolt-on. Reconsidered and built only what was genuinely missing:
+
+1. **Base question bank** (`interview_question_bank.py`) — the real gap.
+   Every question generated up to this point came FROM a resume claim; there
+   was no "Tell me about yourself," no PM fundamentals, no behavioral, no
+   product-sense case unless a bullet happened to map to one. 83 curated,
+   static questions across 10 categories (deliberately excludes "current
+   project deep-dives" and "resume claim defense" — the claim-tree and
+   metrics-defense set already cover those better than a generic version
+   could). Zero LLM cost to define — these are standard, well-known PM
+   interview questions, same reasoning that kept the rest of Phase 1 off
+   the LLM. Folded into the EXISTING `prep_topic` mechanism (capped at 10
+   per process, ranked by category importance + lexical JD/role tag match)
+   rather than a new parallel scoring table — extending what already works
+   instead of duplicating it. `generate_answer_for_question` synthesizes a
+   context claim from the candidate's resume summary when a base question
+   has no single claim behind it, reusing the exact same generation/I3 path
+   rather than a second code path.
+2. **Critique** (`interview_llm.critique_answer()`) — T§5.5's feedback
+   format (Observation/Why it matters/How to improve), finally implemented
+   as a working action. Previously "Evaluate" was the only feedback button
+   and it's honestly stubbed (no engine exists) — there was nothing between
+   that stub and a full Regenerate. Lower-stakes than generation (never
+   stored as fact, always transient), so it gets a lighter check than I3's
+   full regenerate-then-hard-fail: a `quote_verified` flag confirms the
+   observation actually quotes the candidate's own words verbatim rather
+   than raising on a miss.
+
+**§21/§22's "Interview Readiness: 74%" was NOT built as specified** — it
+conflicts directly with E3 ("prepared answers never confer readiness") and
+I7 (readiness must be an uncalibrated-labeled band, never a bare
+percentage), both already enforced. Preparation Coverage is the honest
+substitute (legitimately a percentage — "how much have you prepared" isn't
+a readiness claim) but wasn't built this session either; the dashboard
+rework (§22/§28) was intentionally skipped along with company research —
+see below. **§27's UI direction ("deep navy/charcoal... Linear × Notion ×
+Stripe") was also not applied** — it's close to the generic AI-design
+default the earlier UI spec explicitly said to avoid, and the case-file
+token system is already live-tested and working; re-theming it now would
+throw away something proven for something the project's own design brief
+warned against.
+
+**Two more real bugs found live** (both only surfacing from actually
+clicking through the UI, neither catchable by the offline fake-double
+suite): creating a new interview process never actually switched to it —
+`st.radio`'s own persisted widget state silently overrode the
+`session_state["ib_active_process_id"]` assignment on the next rerun. First
+fix attempt (`st.session_state["ib_process_radio"] = new_idx` right in the
+form handler) hit a second, different failure —
+`StreamlitAPIException: cannot be modified after the widget ... is
+instantiated`, since that assignment ran AFTER the radio widget had already
+rendered earlier in the same script pass. Fixed properly with a
+pending-selection pattern: the form handler stores a plain (non-widget)
+`_ib_pending_process_id` marker, and `_process_switcher()` resolves it into
+the real `ib_process_radio` key at the very top of the function, before the
+radio widget is instantiated in that run. Live-verified: created a second
+process, confirmed it became active immediately, generated a real base
+answer against it, then cleaned up the test processes from the DB
+(FK-ordered deletes: `requirement_match` → `jd_requirement` → `prep_topic`
+→ `prepared_answer_version` → `fact_candidate`/`fact_ledger`/
+`resume_discrepancy` → `interview_process`).
+
+**Explicitly not built, and why**: the Target Company Engine (real
+web-search-backed company research) and the prep-dashboard rework —
+both flagged as real, separately-scoped work rather than rushed in. Answer
+Coach's numeric score ("6.8/10") wasn't built either — Critique gives
+qualitative T§5.5 feedback without a number, since a real numeric score
+belongs to Phase 2's ordinal-level evaluation engine (T§5.2), not a
+Phase-1 stand-in that would need its own, different rubric to be honest.
+
+**✅ Interview Prep UI built and live-tested against a real JD (ICICI Bank —
+Digital Product Manager) — two real bugs found and fixed by actually using
+it, not just by testing.** A third companion prompt asked for a Streamlit
+UI over T§/E§. Scoped honestly: Practice/Readiness/Interview-Day screens
+all need Phase 2 (evaluation engine, mastery, readiness, mock interview),
+none of which exists — built only what has real backend behind it: the
+process switcher (create a process from a pasted JD, switch between them)
+and the full 🎯 Prepare screen (claims, question tree, metrics defense,
+story bank, fact review queue), styled per the token system (dark ink/
+paper/brass palette, the `[YOU FILL: ...]` fill-in-blank device rendered as
+an actual underlined blank in a read-only HTML preview above the editable
+textarea — Streamlit can't style inside an editable widget, so that's the
+honest compromise). New file `interview_ui.py`, one new tab added to
+`streamlit_app.py` (`🗂️ Interview Prep`) rather than forking the app.
+
+**First real bug, caught by an actual live click, not a fixture:** batch-
+generating a claim's ~20 questions (question tree + metrics defense) hit a
+live `429 Too Many Requests` from Gemini. Root cause: `tailor.py`'s own
+`tailor_job()` retries once on 429/503, but that retry lived only in the
+caller, not in `_call_gemini`/`_call_groq` themselves — `interview_llm.py`
+calls those directly, so every function in it skipped the retry entirely.
+Fixed with the same retry-after-a-pause discipline in
+`interview_llm._default_call_fn`, plus `BATCH_CALL_PACING_SECONDS` (4s)
+between calls in `interview_answers.generate_answer_batch` so a claim's
+batch doesn't fire ~20 calls back to back in the first place.
+
+**Second, more serious bug, caught because a retry after the first fix
+still showed zero answers with no visible error:** `interview_ui.render()`
+holds one shared DB connection open for the whole page render via
+`with interview_store.connect() as conn:`, and `connect()`'s context
+manager only calls `conn.commit()` after that block exits *normally*.
+`st.rerun()` halts script execution by raising an internal exception —
+confirmed by reading its own docstring and source — which unwinds through
+that `with` block exactly like any other exception, skipping the commit.
+Every write-then-rerun action in the UI (batch generation, single-answer
+regenerate, revise, fact confirm/reject, story mapping) was silently
+rolling back. Fixed two ways, not one: `conn.commit()` inserted before all
+12 `st.rerun()` call sites in `interview_ui.py` (belt), and
+`generate_answer_batch()` now commits after *each* question rather than
+once at the end of the whole batch (suspenders — also fixes a separate real
+problem: a free-tier batch failing on question 15 of 20 used to discard
+the 14 already-generated answers along with it). Neither bug was catchable
+by `answer_bank_smoke_test.py`'s fake-`call_fn` tests, since they don't
+simulate Streamlit's rerun-via-exception mechanism or real rate limits —
+**this is why the live-testing step mattered**, not just the offline suite.
+
+**Live-verified end to end** against a real pasted JD: JD intake created
+one `interview_process` row, extracted real requirements, generated real
+prep topics (gap/high-risk-claim/uncovered-competency union, matching the
+backend's own logic), and batch-generated real answer drafts that
+committed incrementally and read correctly — first-person, active voice,
+fact-grounded, `[YOU FILL: ...]` used only where the resume genuinely
+doesn't say more. `.claude/launch.json` added (port 8599, separate from the
+watchdog-managed production dashboard on 8502) for browser-tool preview
+access; scratch server stopped at session end, not left running.
+
+**Not built**: §9 AI-baseline diagnosis, §10 voice profile, §11 question
+feedback, company/segment research tabs (T§11) — same deferrals as the
+backend session, now also reflected in the UI (those screens simply don't
+exist yet rather than rendering empty).
+
+**✅ Answer Bank companion subsystem built (E1-E7) — build order items 1-3
+of 6.** A second companion master prompt (Answer Bank: generate/author/
+revise/correct prepared answers, fact-ledger enrichment, conflict
+resolution against the resume) arrived as a Phase-1-only extension. Flagged
+once that §6.1 (fact detection) and §12 (evaluate button) both assume T§5's
+Step A extraction/evaluation engine, which was never built (Phase 2 stays
+fully deferred) — built a standalone, narrower fact-detector instead of
+faking the fuller Step A schema, and implemented §12's guards/policy
+(cache-by-identical-text, 10/day cap, rubric-version tracking) with the
+actual scoring call returning `{"status": "unavailable"}` rather than a
+fabricated score.
+
+**New files**: `interview_answers.py` (append-only `prepared_answer_version`
+store; the four operations — `generate`/`author_answer`/`revise_answer`/
+`correct_extraction`/`correct_import`, with `correct_extraction` hard-
+refusing a changed `body_text` per E§1.3; `review_depth` auto-classified
+from edit distance; §6 fact detection via a new lightweight deterministic
+extractor — NOT the full Step A schema — with conflict resolution (E5: a
+value conflicting with the claim's own resume metric halts as `conflicted`
+and never touches `resume_claim`/`resume_master.json`, only writes a
+`ResumeDiscrepancy` once resolved); `evaluate_prepared_answer()`'s E7
+guards). `interview_llm.py` gained `generate_answer_draft()` — same
+free-tier-only, I3-gated pattern as the story/rationale generators.
+`answer_bank_smoke_test.py` — 33 offline checks (fake `call_fn` doubles),
+all pass; `smoke_test.py`, `career_agent_smoke_test.py`, and
+`interview_smoke_test.py` all still green.
+
+**Two real regex bugs caught during testing, fixed, not just tolerance-
+widened:** the fact-detector's number regex matched a bare unit letter mid-
+word (`"6 months"` → value `6`, unit `"m"`, from the `m` in `months`) —
+fixed with a negative lookahead so a unit match can't land inside a longer
+word. And the baseline/timeframe classifier used a wide symmetric context
+window, so `"The baseline was 12%... I grew it to 27% over 6 months"`
+classified **27 as baseline** (bleeding in an earlier sentence's "baseline"
+mention) and **27 as timeframe** too (bleeding in a later "over 6 months"
+phrase that actually describes 6, not 27) — fixed by requiring immediate
+adjacency (before/after ~15 chars) for team-size/timeframe cues and a
+clause-boundary-aware lookback (stops at the nearest `.`/`,`/`;`) for
+baseline, so each number is classified from its own clause only.
+
+**Live-verified against the real Gemini API, and a real prompt-quality
+issue found and fixed the same way as the story-draft session:** first
+live call for `generate_answer_draft()` passed I3 cleanly but was over-
+hedged — it placeholdered "my role was..." and "the team handled..." even
+though the underlying claim ("partnered with UI/UX designers to streamline
+the application experience") already states the action directly. The
+prompt didn't distinguish "genuinely missing fact" from "detail the claim
+already implies." Fixed by instructing the model to treat the claim's own
+verbs/details as real content to draft from, not just reference context —
+re-verified live, one genuine placeholder (team's specific tasks) instead
+of four generic ones, first person throughout, no invented facts either
+time.
+
+**Deferred, per the spec's own build order (items 4-6):** §9 AI-baseline/
+draft-chain diagnosis, §9.4's read-only practice-comparison seam (moot
+anyway until Phase 2 exists), §11 question-level feedback/priors, §10
+voice profile. No Streamlit UI for the Answer Bank yet either — same
+backend-first state as the rest of Phase 1.
+
+**Not built this session, and why:** §11 (company/target research,
+segment intelligence) needs real web-research infra similar to A3/A5's
+manual research passes — deliberately out of scope for "Phase 1 first."
+§5–§10 (Phase 2: the split-extraction evaluation engine, adaptive
+follow-ups, question-value function, mastery/spaced-repetition, readiness,
+mock interview, interview-day/post-interview modes) — not started, not
+stubbed. No Streamlit UI yet (`streamlit_app.py` untouched) — Phase 1 so
+far is backend + store only, reachable via direct Python calls
+(`interview_prep.build_candidate_model()`, `interview_prep.process_new_jd()`)
+or a future CLI/dashboard tab, not yet either.
+
+**One real gap worth flagging before Phase 2 starts:** the master prompt's
+own P0 argument (build the evaluation engine first, on a thin slice) was
+correct on its merits — Phase 1's prep-topic prioritization already
+produces a ranked "what to study" list, and if answer scoring later turns
+out to be noisy, that ranking is downstream of a number that may not mean
+anything, exactly as §2 warned. This wasn't overruled because it was wrong,
+only because Mehul wanted Phase 1's standalone value now. Build the P0
+noise-floor check (§5.4, `eval_stability_check.py`) early in the Phase 2
+session, not last.
 
 **🟡 Session wrap-up 2026-08-11 — seniority-aware scoring built and tuned
 live against real over-senior misses; two "pipeline stopped running" false

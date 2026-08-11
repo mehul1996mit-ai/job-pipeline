@@ -14,6 +14,10 @@ static/jt_status_data.json
 # + data/seen_jobs.json by re-running company_targeting.py — not source, and a
 # binary file would just churn the git history on every run.
 data/career_agent.sqlite3*
+# Interview Prep Toolkit's SQLite store: fully rebuildable from
+# resume_master.json + pasted JDs by re-running interview_prep.process_new_jd()
+# — not source, same reasoning as career_agent.sqlite3 above.
+data/interview_prep.sqlite3*
 
 # watchdog auto-sync status (local runtime state, not code)
 dashboard_sync.log

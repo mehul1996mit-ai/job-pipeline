@@ -181,8 +181,9 @@ freshness_banner()
 # re-check it here if the extension is ever reinstalled or repackaged.
 EXTENSION_ID = "ngokbgjnigblebajkjihiapolkpllhki"
 
-tab_queue, tab_status, tab_learn, tab_run, tab_filters, tab_outreach = st.tabs(
-    ["📋 Review queue", "🧭 Status", "🧠 Learning", "🚀 Run now", "⚙️ Filters", "📤 Outreach review"])
+tab_queue, tab_status, tab_learn, tab_run, tab_filters, tab_outreach, tab_interview = st.tabs(
+    ["📋 Review queue", "🧭 Status", "🧠 Learning", "🚀 Run now", "⚙️ Filters",
+     "📤 Outreach review", "🗂️ Interview Prep"])
 
 # ------------------------------------------------------------ Review queue
 with tab_queue:
@@ -733,4 +734,10 @@ with tab_outreach:
                                 ca_crm.update_outreach_state(
                                     _conn2, row["id"], "CLOSED", reason="rejected_at_review")
                             st.info("Rejected — moved to CLOSED, not sent.")
+
                             st.rerun()
+
+# --------------------------------------------------------------- Interview Prep
+with tab_interview:
+    import interview_ui
+    interview_ui.render()
