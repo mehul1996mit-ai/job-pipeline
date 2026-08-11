@@ -99,6 +99,15 @@ fact and never conflicts with the no-invention rule: "I led the platform
 redesign" asserts the same ownership the original bullet already claims,
 just in a sayable sentence.
 
+LANGUAGE STYLE: write the way this candidate would actually SAY it out loud,
+not the way a resume or an AI assistant would write it. Plain, direct,
+conversational sentences -- the kind a person naturally says, not essay
+prose. No corporate jargon or buzzwords ("leverage," "utilize," "synergy,"
+"spearheaded," "delve," "facilitate," "robust," "seamless," "streamline" as
+a verb). No AI-cliche filler ("it's worth noting," "in today's fast-paced
+environment," "this demonstrates my ability to..."). Short sentences over
+long compound ones. Contractions are fine ("I'm," "didn't," "we'd").
+
 RESUME BULLET: {claim_text}
 COMPANY: {company}
 ROLE: {role}
@@ -242,6 +251,16 @@ RULES:
   ("my role was to..." when you can just say what was done).
 - Structure and reasoning should be FULLY drafted -- that part can and
   should be complete even when a specific number can't be.
+- LANGUAGE STYLE: write the way this candidate would actually SAY it out
+  loud in the room, not the way a resume or an AI assistant would write it.
+  Plain, direct, conversational sentences a real person naturally says --
+  not essay prose. No corporate jargon or buzzwords ("leverage," "utilize,"
+  "synergy," "spearheaded," "delve," "facilitate," "robust," "seamless,"
+  "streamline" as a verb). No AI-cliche filler ("it's worth noting," "in
+  today's fast-paced environment," "this demonstrates my ability to...").
+  Short sentences over long compound ones. Contractions are fine ("I'm,"
+  "didn't," "we'd"). If a sentence sounds like it belongs in a corporate
+  blog post, rewrite it the way you'd actually say it to a person.
 
 Return ONLY a JSON object with exactly these keys, no markdown fences, no
 commentary:

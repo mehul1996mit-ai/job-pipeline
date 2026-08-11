@@ -70,6 +70,27 @@ context. Live-verified against the real ICICI Bank process (43% fit,
 smoke suites (`interview_smoke_test.py`, `answer_bank_smoke_test.py`)
 still pass — no backend changes, UI-only.
 
+**✅ Generated answers/stories tuned for plain, human language (2026-08-11).**
+Mehul flagged that generated prepared answers read as AI-written, not
+something a candidate would actually say out loud. `interview_llm.py`'s
+`ANSWER_DRAFT_PROMPT` (the main "Generate" path, used by every claim
+question, metric-defense question, and base question) and
+`STORY_DRAFT_PROMPT` both gained an explicit LANGUAGE STYLE directive:
+plain conversational sentences over essay prose, no corporate jargon/
+buzzwords ("leverage," "utilize," "synergy," "spearheaded," "delve,"
+"robust," "streamline" as a verb), no AI-cliche filler ("it's worth
+noting," "in today's fast-paced environment"), contractions allowed. This
+sits alongside the existing I3 fact-integrity and active-voice rules, not
+instead of them — style guidance only, no change to what facts/placeholders
+are allowed. Live-verified against the real Gemini API (not just the
+fake-double smoke tests): a re-generated answer for the Bajaj Finance
+Personal Loan claim came back as plain first-person sentences with no
+jargon, and a re-drafted story for the UI/UX-partnership claim kept correct
+placeholder discipline while reading naturally. Both smoke suites
+(`interview_smoke_test.py`, `answer_bank_smoke_test.py`) still pass
+unaffected, since they test structure/guards via fake call doubles, not
+prompt wording.
+
 ## STATUS (last updated 2026-08-11)
 
 **🟢 Interview Prep & Practice toolkit — Phase 1 (preparation) built,
