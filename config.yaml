@@ -75,11 +75,22 @@ filters:
     - project manager
     - performance marketing manager
   # City allowlist. Empty list = accept all cities. "remote" always passes.
+  # Widened 2026-08-10 (owner ask, volume too low): added the other major
+  # India GCC/product hubs. Real day-by-day run logs showed ~520 jobs/day
+  # already clearing every OTHER filter, so city was the actual bottleneck
+  # worth loosening first -- unlike title/experience, widening geography
+  # doesn't trade away relevance, just where you'd need to be.
   cities:
     - pune
     - mumbai
     - bangalore
     - bengaluru
+    - hyderabad
+    - delhi
+    - gurugram
+    - gurgaon
+    - noida
+    - chennai
     - remote
   # Annual INR. Enforced ONLY when the listing itself reports a salary.
   # Set to null to disable.
@@ -182,6 +193,7 @@ greenhouse:
     - mongodb                          # MongoDB — Gurugram PM
     - okta                             # Okta — Bengaluru PM/alliances (India GCC)
     - phonepe                          # PhonePe — Bangalore PM
+    - highradius                       # HighRadius — verified 2026-08-10, 56 India postings, 5 PM/BA-relevant
 
 lever:
   # Verified the same way, 2026-07-28.
@@ -193,6 +205,8 @@ smartrecruiters:
   # Public postings API. Verified the same way, 2026-07-28.
   companies:
     - ixigo                            # ixigo — Bengaluru/Gurgaon PM + partnerships
+    - swiggy                           # Swiggy — verified 2026-08-10, 27 India postings, 2 Senior PM
+    - freshworks                       # Freshworks — verified 2026-08-10, 40 India postings, 2 Staff PM
   limit: 100
   detail_top_n: 5              # full JD for the first N per company only
 

@@ -84,7 +84,13 @@ check("city allow: 'Pune, Maharashtra'",
       matcher.city_ok("Pune, Maharashtra", cities))
 check("city allow: 'Remote - India'", matcher.city_ok("Remote - India",
                                                       cities))
-check("city reject: 'Chennai, TN'", not matcher.city_ok("Chennai, TN",
+# Chennai moved from "reject" to "allow" 2026-08-10 (cities widened for
+# volume) -- swapped the reject-example to a city still genuinely excluded,
+# not deleted, so this still guards the real behavior (non-allowlisted
+# cities are rejected), not just today's specific allowlist contents.
+check("city allow: 'Chennai, TN' (widened 2026-08-10)",
+      matcher.city_ok("Chennai, TN", cities))
+check("city reject: 'Kolkata, WB'", not matcher.city_ok("Kolkata, WB",
                                                         cities))
 check("city: empty allowlist accepts all", matcher.city_ok("Chennai", []))
 check("city allow: bare 'Remote' with no scope", matcher.city_ok("Remote", cities))
