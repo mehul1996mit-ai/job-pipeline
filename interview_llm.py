@@ -224,7 +224,13 @@ skeleton, a real draft with structure and reasoning fully worked out.
 
 QUESTION: {question_text}
 WHAT IT'S TESTING (the resume claim behind this question): {claim_text}
-COMPANY: {company}
+COMPANY WHERE THIS CLAIM HAPPENED (the candidate's own past/current employer): {company}
+
+THE CANDIDATE IS INTERVIEWING FOR: {target_role} at {target_company}
+JOB DESCRIPTION FOR THIS ROLE (this is who's actually asking -- use it to
+decide what to emphasize, what vocabulary/priorities to mirror, and how to
+connect the claim above to what THIS employer specifically cares about):
+{jd_excerpt}
 
 CONFIRMED FACTS AVAILABLE -- use ONLY these numbers/facts, invent nothing else:
 {facts_block}
@@ -240,7 +246,20 @@ RULES:
   not a gap, it's already a fact.
 - Use ONLY the facts given above -- the claim, the confirmed facts, and the
   story. Never invent a number, team size, stakeholder name, or outcome
-  that isn't already given.
+  that isn't already given. You MAY reference a number or requirement that
+  appears in the job description above (e.g. "the role calls for owning the
+  full funnel, which is exactly what I did here") -- that's citing what the
+  employer stated, not inventing a fact about the candidate. Never assert a
+  NEW fact ABOUT {target_company} itself (revenue, team size, a specific
+  initiative) beyond what's written in the job description above.
+- TAILOR the answer to THIS question, for THIS role, at THIS company -- not
+  a generic answer that would fit any interview. Two different questions
+  about the same claim should read differently because they're asked from
+  different angles; the same claim answered for two different target roles
+  should emphasize different things depending on what each JD actually
+  values. If the question is a "why this role/company" or fit-style
+  question, engage directly with something specific in the job description
+  above, not a generic answer that never mentions it.
 - Only use "[YOU FILL: <what's missing>]" for a detail genuinely absent
   from everything given (e.g. an exact team size, a named stakeholder, a
   precise date) -- not for something the claim already implies. Placeholder
@@ -273,23 +292,49 @@ list above. Every number in your response MUST already appear in the facts
 given. Anything else must be the literal placeholder "[YOU FILL: ...]"."""
 
 
+_JD_EXCERPT_MAX_CHARS = 2500
+
+
 def generate_answer_draft(question_text: str, claim_text: str, company: str,
                           story_text: str, master_resume: dict,
                           extra_allowed_numbers: set[str] | None = None,
+                          target_company: str | None = None,
+                          target_role: str | None = None,
+                          jd_text: str | None = None,
                           config: dict | None = None, call_fn=None) -> dict:
     """Answer Bank §4 batch-generation primitive. Same I3 discipline as
     generate_story_draft(): one regeneration on a fact violation, then a
     hard failure. `extra_allowed_numbers` lets an already-confirmed
     fact_ledger entry for this process count as legitimate (it's a real
-    candidate_asserted fact, just not resume-sourced)."""
+    candidate_asserted fact, just not resume-sourced).
+
+    `target_company`/`target_role`/`jd_text` are the process this answer is
+    actually being prepared for -- without them every answer only ever knew
+    the question and the candidate's own past claim, never who's asking,
+    which is why answers read generic/interchangeable across questions and
+    processes (the exact gap Mehul flagged live). A number that appears in
+    the JD itself is allowed in the answer (citing the employer's own stated
+    ask isn't inventing a candidate fact) but nothing else about the target
+    company may be asserted -- I3 still governs facts ABOUT THE CANDIDATE,
+    this only widens what's legitimately citable FROM the JD."""
     call_fn = call_fn or resolve_free_call_fn(config)
     facts_block = "\n".join(f"- {n}" for n in sorted(_all_resume_numbers(master_resume))) or "(none)"
     if extra_allowed_numbers:
         facts_block += "\n" + "\n".join(f"- {n} (confirmed by candidate)" for n in sorted(extra_allowed_numbers))
+
+    jd_excerpt = (jd_text or "").strip()
+    if len(jd_excerpt) > _JD_EXCERPT_MAX_CHARS:
+        jd_excerpt = jd_excerpt[:_JD_EXCERPT_MAX_CHARS] + " …(truncated)"
+    jd_numbers = set(re.findall(r"\d+(?:\.\d+)?", jd_excerpt))
+    allowed_numbers = (extra_allowed_numbers or set()) | jd_numbers
+
     prompt = ANSWER_DRAFT_PROMPT.format(
         question_text=question_text, claim_text=claim_text or "(none)",
         company=company or "unspecified", facts_block=facts_block,
-        story_block=story_text or "(none)")
+        story_block=story_text or "(none)",
+        target_company=target_company or "unspecified",
+        target_role=target_role or "unspecified",
+        jd_excerpt=jd_excerpt or "(not provided)")
 
     def _parse_and_check(raw):
         parsed = tailor._extract_json(raw)
@@ -297,7 +342,7 @@ def generate_answer_draft(question_text: str, claim_text: str, company: str,
         # Reuse check_fact_integrity's number-grounding discipline against a
         # single free-text field, same as the story path.
         ok, violations = check_fact_integrity(
-            {"situation": answer_text}, master_resume, extra_allowed_numbers)
+            {"situation": answer_text}, master_resume, allowed_numbers)
         if answer_text.strip() and ok:
             return answer_text, [], True
         if not answer_text.strip():

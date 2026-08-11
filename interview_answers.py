@@ -194,8 +194,19 @@ def generate_answer_for_question(conn, process_id: int, question_source: str,
     facts (resume_master.json + this process's fact_ledger) and, if given,
     a story from the bank. Delegates drafting + I3 enforcement to
     interview_llm.generate_answer_draft() (local import — keeps the LLM/API
-    surface out of callers that only read/confirm facts)."""
+    surface out of callers that only read/confirm facts).
+
+    Also reads this process's own target company/role/JD text and threads
+    them into the draft -- without this, every answer only ever knew the
+    QUESTION and the CANDIDATE'S PAST claim, never who they're actually
+    interviewing for, which is why answers for different questions/processes
+    read near-identically (found live, flagged by Mehul: every answer just
+    talked about the current role, nothing tailored to the target JD)."""
     from interview_llm import generate_answer_draft
+
+    process_row = conn.execute(
+        "SELECT company_name, role_title, jd_text FROM interview_process WHERE id = ?",
+        (process_id,)).fetchone()
 
     if claim is None and not story_text and question_source == "base_question":
         # Base questions (T§4's "PM fundamentals"/"behavioral"/etc — not
@@ -224,6 +235,9 @@ def generate_answer_for_question(conn, process_id: int, question_source: str,
         story_text=story_text or "",
         master_resume=master_resume,
         extra_allowed_numbers=ledger_numbers,
+        target_company=(process_row["company_name"] if process_row else None),
+        target_role=(process_row["role_title"] if process_row else None),
+        jd_text=(process_row["jd_text"] if process_row else None),
         config=config, call_fn=call_fn)
 
     draft_status = classify_draft_status(draft["answer_text"], had_claim_or_story=True)

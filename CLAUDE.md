@@ -91,6 +91,34 @@ placeholder discipline while reading naturally. Both smoke suites
 unaffected, since they test structure/guards via fake call doubles, not
 prompt wording.
 
+**✅ Generated answers now actually tailored to the target company/role/JD,
+not just the resume claim (2026-08-11).** Mehul flagged that every answer
+read similar and only ever talked about the current role — a real gap, not
+a phrasing issue: `generate_answer_draft()`'s prompt never received the
+target company, role, or JD text at all, only the question and the
+resume-side claim, so there was structurally nothing for the model to
+tailor toward. Fixed at the source: `interview_answers.
+generate_answer_for_question()` now reads the active process's own
+`company_name`/`role_title`/`jd_text` from `interview_process` and threads
+them into `interview_llm.generate_answer_draft()` (new params, JD text
+capped at 2500 chars). `ANSWER_DRAFT_PROMPT` gained a "THE CANDIDATE IS
+INTERVIEWING FOR / JOB DESCRIPTION FOR THIS ROLE" block plus an explicit
+rule to tailor emphasis to what THIS employer's JD actually cares about
+rather than giving a generic answer. I3 stays fully intact: JD-text numbers
+are added to the allowed-numbers set (citing "the JD asks for 5+ years" is
+citing what the employer stated, not inventing a candidate fact) but a NEW
+fact ABOUT the target company (revenue, team size, initiatives) beyond the
+JD text is still rejected exactly as before. No caller changes needed — the
+process context is read inside `generate_answer_for_question` itself, so
+every existing call site (batch generation, single regenerate, base
+questions) picks this up automatically. Live-verified: the identical Bajaj
+Finance Personal Loan claim, answering the identical question, produced a
+risk/compliance-framed answer for an ICICI Bank JD and a speed/scrappiness-
+framed answer for a startup Growth PM JD — same underlying facts (27%/14%),
+genuinely different emphasis, zero fact-integrity violations either way.
+Both smoke suites still pass unaffected (fake-double tests, no process
+context to thread).
+
 ## STATUS (last updated 2026-08-11)
 
 **🟢 Interview Prep & Practice toolkit — Phase 1 (preparation) built,
