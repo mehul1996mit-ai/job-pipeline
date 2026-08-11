@@ -1,10 +1,24 @@
-"""Gmail OAuth for A8 (outreach.py) — F1/F7 boundary lives here.
+"""Gmail OAuth for A8/A9 (outreach.py/outreach_crm.py/outreach_send.py) —
+F1/F7 boundary lives here.
 
-F1: scope is compose (+ readonly for reply detection in A9) — the Gmail
-*send* scope is never requested. SCOPES below is the only place scopes are
-defined; the career_agent_smoke_test.py F1 grep also checks this file (this
-paragraph avoids spelling the forbidden scope string literally so it
-doesn't trip its own guard).
+F1, renegotiated 2026-08-10 (see CLAUDE.md's entry that day for the full
+reasoning): the send scope is now requested, because Mehul asked for a
+one-click batch-review flow (outreach_send.py + streamlit_app.py's
+"Outreach review" tab) instead of full unattended auto-send, which was
+explicitly considered and declined — a bad cold email to a real hiring
+contact can't be unsent, unlike a bad row in a CSV. The guard that used to
+be "this scope must never appear anywhere" is now a narrower, still-real
+one: send() is only ever CALLED from outreach_send.py's single function,
+which refuses to run without an explicit confirmed=True set by a real
+human clicking Approve — never a default, never reachable from anywhere
+else. career_agent_smoke_test.py's F1 check enforces this as a whitelist.
+SCOPES below is the only place scopes are defined.
+
+If this scope's presence here is ever a problem again (e.g. a compose-only
+mode is wanted back), the token needs re-consent either way — deleting
+~/.career_agent/token.json and re-running get_credentials() is what
+picks up a SCOPES change; Google does not silently upgrade or downgrade a
+cached token's scope on refresh.
 
 F7: the token and OAuth client secret live ONLY on this machine
 (~/.career_agent/), mode 600 where the OS supports it (Windows NTFS ACLs
@@ -26,6 +40,7 @@ from googleapiclient.discovery import build
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
 ]
 
 CAREER_AGENT_DIR = os.path.join(os.path.expanduser("~"), ".career_agent")

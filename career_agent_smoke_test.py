@@ -1,4 +1,4 @@
-"""Local smoke test for Career Agent's P0 guardrails + A2/A3/A5/A8.
+"""Local smoke test for Career Agent's P0 guardrails + A2/A3/A5/A8/A9.
 No API keys needed. A5/A8's MX-record checks do real DNS lookups (no API
 key, but does need network reachability) — everything else is offline.
 These live lookups are occasionally flaky against transient DNS hiccups
@@ -8,16 +8,19 @@ that repeats 2+ times in a row is a real bug, not flakiness.
 
 Run:  python career_agent_smoke_test.py
 
-Verifies: (1) F1 — no messages/send or gmail.send anywhere in the repo,
-(2) F2 — contact_channel refuses a null/invalid consent_basis and accepts a
-valid one, (3) F4 — draft-per-day and per-company-cooldown caps are enforced
-and can't be raised past the ceiling by config, (4) A2 — the allowlist floor
-force-includes every company, Bajaj Finance is flagged conflict-of-interest,
-and floor companies are exempt from the DORMANT cap, (5) A3 — node source is
-gated the same way F2 gates consent_basis, function/node-type classification
-matches known cases, owns_req_likelihood modifiers apply correctly, and
-warm_path_distance only ever comes from network.yaml, never a traversal,
-(6) A5 — email syntax/MX/domain-match/suppression/dedupe all gate before
+Verifies: (1) F1 — the gmail.send scope string and a live Gmail send API
+call are each confined to exactly one whitelisted file (gmail_auth.py and
+outreach_send.py respectively) — renegotiated 2026-08-10 from a blanket
+ban to a whitelist, see CLAUDE.md, (2) F2 — contact_channel refuses a
+null/invalid consent_basis and accepts a valid one, (3) F4 — draft-per-day
+and per-company-cooldown caps are enforced and can't be raised past the
+ceiling by config, (4) A2 — the allowlist floor force-includes every
+company, Bajaj Finance is flagged conflict-of-interest, and floor companies
+are exempt from the DORMANT cap, (5) A3 — node source is gated the same way
+F2 gates consent_basis, function/node-type classification matches known
+cases, owns_req_likelihood modifiers apply correctly, and warm_path_distance
+only ever comes from network.yaml, never a traversal, (6) A5 — email
+syntax/MX/domain-match/suppression/dedupe all gate before
 insert_contact_channel ever gets called, and confidence scoring behaves,
 (7) A8 — every §8 precondition (conflict-of-interest, confidence floor,
 suppression, F4 caps, owns_req_likelihood/warm_path floor for no-job
@@ -25,6 +28,13 @@ outreach) gates before a draft is created, and composition validation
 (specificity required, length ceilings) is enforced. Uses the .eml fallback
 path (gmail_service=None), not live Gmail — the real Gmail path was
 verified manually against mehul.96.mit@gmail.com, see CLAUDE.md.
+(8) A9 — the outreach state machine, do-not-contact-only suppression,
+follow-up caps, and the 30-day weight refit's honest-shortfall/math paths.
+(9) Outreach review/send — send_approved_draft() refuses without an
+explicit confirmed=True, refuses for a non-DRAFTED or .eml-fallback
+outreach, refuses under CI, and on success sends the EXACT existing draft
+(never recomposes) and transitions state through A9's own machine. Uses a
+fake Gmail service double, not a live send.
 """
 import datetime
 import os
@@ -45,27 +55,52 @@ def check(name, condition, detail=""):
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-print("== 1. F1 — human sends, always")
-hits = []
+print("== 1. F1 — human sends, always (whitelist model, renegotiated 2026-08-10)")
+# Two things are checked separately: (a) the gmail.send SCOPE STRING may
+# only appear where scopes are declared (gmail_auth.py), and (b) a live
+# Gmail send API CALL (drafts().send(/messages().send() — a re-decompose-
+# and-send in a different module would bypass outreach_send.py's
+# confirmed=True gate entirely, so this checks the call site, not just the
+# scope) may only appear in outreach_send.py, the one function anywhere
+# permitted to actually send. Anywhere else finding either string is a
+# real violation, not a style nit — see CLAUDE.md's 2026-08-10 entry for
+# why this moved from a blanket ban to a whitelist.
+import re
+
+SEND_SCOPE_ALLOWED_IN = {"gmail_auth.py"}
+SEND_CALL_ALLOWED_IN = {"outreach_send.py"}
+SEND_CALL_RE = re.compile(r"(drafts\(\)|messages\(\))\.send\(")
+
+scope_hits, call_hits = [], []
 for root, dirs, files in os.walk(REPO_ROOT):
     dirs[:] = [d for d in dirs if d not in (".git", "__pycache__", "data")]
     for fn in files:
-        # .md is deliberately excluded: docs (this session's CLAUDE.md entry
-        # included) legitimately name these forbidden strings in prose while
-        # explaining the guard exists — only code/config paths matter here.
+        # .md is deliberately excluded: docs (CLAUDE.md/README.md) legitimately
+        # name these strings in prose while explaining the guard — only
+        # code/config paths matter here.
         if not fn.endswith((".py", ".yaml", ".yml")):
             continue
         path = os.path.join(root, fn)
         if path == os.path.abspath(__file__):
-            continue  # this file names the forbidden strings in its own docstring/checks
+            continue  # this file names the forbidden strings in its own checks
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 text = f.read()
         except OSError:
             continue
         if "messages/send" in text or "gmail.send" in text.replace('"', "").replace("'", ""):
-            hits.append(path)
-check("no messages/send or gmail.send scope anywhere in the repo", not hits, str(hits))
+            if fn not in SEND_SCOPE_ALLOWED_IN:
+                scope_hits.append(path)
+        if SEND_CALL_RE.search(text) and fn not in SEND_CALL_ALLOWED_IN:
+            call_hits.append(path)
+check("gmail.send scope string appears only in gmail_auth.py", not scope_hits, str(scope_hits))
+check("a live drafts().send()/messages().send() call exists ONLY in outreach_send.py",
+      not call_hits, str(call_hits))
+
+with open(os.path.join(REPO_ROOT, "outreach_send.py"), "r", encoding="utf-8") as f:
+    send_module_text = f.read()
+check("outreach_send.py itself really does call a Gmail send API (the whitelist "
+      "isn't just permitting an empty file)", bool(SEND_CALL_RE.search(send_module_text)))
 
 print("\n== 2. F2 — consented contacts only")
 import outreach_store as store
@@ -467,6 +502,18 @@ with store.connect(a8_db) as conn:
         del os.environ["CI"]
     check("draft_outreach refuses to run at all when CI env var is set (F7)", ci_raised)
 
+def _write_test_channel(conn, node_id, email, consent_basis="user_existing_relationship", confidence=0.9):
+    """Sections 8/9 test A9/outreach_send logic, not A5's live-DNS domain
+    gate — writing the channel directly through insert_contact_channel()
+    (still F2-gated) instead of a5.resolve_contact() keeps these fixtures
+    from being yet more rolls against has_mx_record()'s documented,
+    unretried live-DNS flakiness. A5 itself is already covered in section 6."""
+    return store.insert_contact_channel(
+        conn, node_id, "email", email, consent_basis=consent_basis,
+        source_url=None, captured_at=now, confidence=confidence,
+    )
+
+
 print("\n== 8. A9 — CRM & calibration")
 import outreach_crm as a9
 
@@ -485,9 +532,8 @@ with store.connect(a9_db) as conn:
         (a9_company_id, now),
     )
     a9_node_id = conn.execute("SELECT id FROM authority_node WHERE person_name='CRM Node'").fetchone()["id"]
-    a9_channel_id = a5.resolve_contact(conn, a9_node_id, "crm@razorpay.com", "user_existing_relationship",
-                                        None, company_domain="razorpay.com")
-    check("test fixture: contact channel resolved for A9 tests", a9_channel_id is not None)
+    a9_channel_id = _write_test_channel(conn, a9_node_id, "crm@razorpay.com")
+    check("test fixture: contact channel written for A9 tests", a9_channel_id is not None)
 
     outreach_result = a8.draft_outreach(conn, a9_company_id, a9_node_id, a9_channel_id,
                                          "Short subject", "A short, valid body.",
@@ -530,8 +576,7 @@ with store.connect(a9_db) as conn:
     # tested here, which is A9's suppression behavior in isolation) that
     # closes WITHOUT an explicit do-not-contact reason must NOT be
     # suppressed — a plain rejection or no-response isn't consent withdrawal.
-    a9_channel2_id = a5.resolve_contact(conn, a9_node_id, "crm2@razorpay.com", "user_existing_relationship",
-                                         None, company_domain="razorpay.com")
+    a9_channel2_id = _write_test_channel(conn, a9_node_id, "crm2@razorpay.com")
     conn.execute(
         "INSERT INTO outreach (company_id, authority_node_id, channel_id, state, created_at) "
         "VALUES (?, ?, ?, 'DRAFTED', ?)",
@@ -553,8 +598,7 @@ with store.connect(a9_db) as conn:
 
     # follow-ups — a 3rd outreach row, same reasoning as outreach2 above for
     # inserting directly rather than through draft_outreach's F4 gate.
-    a9_channel3_id = a5.resolve_contact(conn, a9_node_id, "crm3@razorpay.com", "user_existing_relationship",
-                                         None, company_domain="razorpay.com")
+    a9_channel3_id = _write_test_channel(conn, a9_node_id, "crm3@razorpay.com")
     conn.execute(
         "INSERT INTO outreach (company_id, authority_node_id, channel_id, state, created_at) "
         "VALUES (?, ?, ?, 'DRAFTED', ?)",
@@ -630,6 +674,195 @@ with store.connect(a9_db) as conn:
         check("refit does NOT mutate authority_graph.NODE_TYPE_BASE_LIKELIHOOD (proposal only)",
               a3.NODE_TYPE_BASE_LIKELIHOOD == {"function_owner": 0.85, "hiring_manager": 0.70,
                                                 "ta_lead_function": 0.45, "generic_ta": 0.20})
+
+    # detect_sent_via_gmail(): fake service shaped like real Gmail behavior,
+    # confirmed live 2026-08-10 — sending a draft (via the Gmail web UI OR
+    # drafts().send()) assigns the message a NEW id; only the thread id
+    # survives. An earlier version of this function matched on the stored
+    # message id, which no longer exists post-send — every real send 404'd
+    # and was silently swallowed, leaving the row stuck at DRAFTED forever.
+    class _FakeThreadsResource:
+        def __init__(self, thread_state):
+            self._thread_state = thread_state  # {"messages": [...]}
+
+        def get(self, userId, id, format):
+            return self
+
+        def execute(self):
+            return self._thread_state
+
+    class _FakeGmailService:
+        def __init__(self, thread_state):
+            self._threads = _FakeThreadsResource(thread_state)
+
+        def users(self):
+            return self
+
+        def threads(self):
+            return self._threads
+
+    conn.execute(
+        "INSERT INTO outreach (company_id, authority_node_id, channel_id, state, "
+        "subject, body, gmail_thread_id, created_at) VALUES "
+        "(?, ?, ?, 'DRAFTED', 'Detect-sent test subject', 'body', 'thread-det-1', ?)",
+        (a9_company_id, a9_node_id, a9_channel_id, now),
+    )
+    det_outreach_id = conn.execute(
+        "SELECT id FROM outreach WHERE gmail_thread_id = 'thread-det-1'").fetchone()["id"]
+
+    still_draft_service = _FakeGmailService(
+        {"messages": [{"id": "msg-draft-1", "labelIds": ["DRAFT"]}]})
+    moved_none = a9.detect_sent_via_gmail(still_draft_service, conn)
+    row = conn.execute("SELECT state FROM outreach WHERE id=?", (det_outreach_id,)).fetchone()
+    check("detect_sent_via_gmail leaves a still-drafted thread alone",
+          det_outreach_id not in moved_none and row["state"] == "DRAFTED")
+
+    now_sent_service = _FakeGmailService(
+        {"messages": [{"id": "msg-sent-2", "labelIds": ["SENT", "INBOX"]}]})
+    moved_sent = a9.detect_sent_via_gmail(now_sent_service, conn)
+    row = conn.execute("SELECT state, gmail_message_id FROM outreach WHERE id=?",
+                        (det_outreach_id,)).fetchone()
+    check("detect_sent_via_gmail matches by thread id, not the stale stored message id",
+          det_outreach_id in moved_sent and row["state"] == "SENT_BY_USER")
+    check("detect_sent_via_gmail updates gmail_message_id to the real post-send message id",
+          row["gmail_message_id"] == "msg-sent-2")
+
+print("\n== 9. Outreach review/send (batch-approve UI backend)")
+import outreach_send as a9send
+
+
+class _FakeSendService:
+    """Mimics service.users().drafts().create(...)/.send(...).execute()
+    without a real Gmail call — offline, deterministic. Records every send
+    call it receives so tests can assert exactly what was sent."""
+    def __init__(self):
+        self.send_calls = []
+        self._next_draft_n = 0
+        self._pending_call = None
+
+    def users(self):
+        return self
+
+    def drafts(self):
+        return self
+
+    def create(self, userId, body):
+        self._next_draft_n += 1
+        self._pending_call = ("create", self._next_draft_n)
+        return self
+
+    def send(self, userId, body):
+        self.send_calls.append({"userId": userId, "body": body})
+        self._pending_call = ("send",)
+        return self
+
+    def execute(self):
+        if self._pending_call[0] == "create":
+            n = self._pending_call[1]
+            return {"id": f"fake-draft-{n}",
+                    "message": {"id": f"fake-message-{n}", "threadId": f"fake-thread-{n}"}}
+        return {"id": "fake-sent-message-id", "labelIds": ["SENT"]}
+
+
+send_db = os.path.join(tmpdir, "send.sqlite3")
+store.init_db(send_db)
+with store.connect(send_db) as conn:
+    conn.execute(
+        "INSERT INTO company (name, domain, is_conflict_of_interest, created_at, updated_at) "
+        "VALUES ('SendTestCo', 'razorpay.com', 0, ?, ?)", (now, now),
+    )
+    send_company_id = conn.execute("SELECT id FROM company WHERE name='SendTestCo'").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO authority_node (company_id, person_name, source, seniority_band, created_at) "
+        "VALUES (?, 'Send Node', 'user_manual_entry', 'function_owner', ?)",
+        (send_company_id, now),
+    )
+    send_node_id = conn.execute("SELECT id FROM authority_node WHERE person_name='Send Node'").fetchone()["id"]
+    send_channel_id = _write_test_channel(conn, send_node_id, "sendtest@razorpay.com")
+
+    fake_service = _FakeSendService()
+    draft_result = a8.draft_outreach(conn, send_company_id, send_node_id, send_channel_id,
+                                      "Short subject", "A short, valid body.",
+                                      "Company just launched X, per their own newsroom",
+                                      gmail_service=fake_service, job_id="send-test-job")
+    send_outreach_id = draft_result["outreach_id"]
+    check("test fixture: a draft with a fake Gmail draft id exists to send",
+          draft_result.get("draft_gmail_id") is not None)
+
+    pending = a9send.list_pending_review(conn)
+    check("list_pending_review surfaces the drafted outreach with full context",
+          any(p["id"] == send_outreach_id and p["company_name"] == "SendTestCo"
+              and p["to_email"] == "sendtest@razorpay.com" for p in pending))
+
+    unconfirmed_raised = False
+    try:
+        a9send.send_approved_draft(conn, fake_service, send_outreach_id, confirmed=False)
+    except ValueError:
+        unconfirmed_raised = True
+    check("send_approved_draft refuses without confirmed=True (defense in depth)", unconfirmed_raised)
+    check("an unconfirmed call never actually reaches the Gmail service",
+          len(fake_service.send_calls) == 0)
+
+    result = a9send.send_approved_draft(conn, fake_service, send_outreach_id, confirmed=True)
+    check("send_approved_draft succeeds when explicitly confirmed", result.get("id") == "fake-sent-message-id")
+    check("the fake service actually received exactly one send call with the right draft id",
+          len(fake_service.send_calls) == 1
+          and fake_service.send_calls[0]["body"]["id"] == draft_result["draft_gmail_id"])
+    row = conn.execute("SELECT state, user_sent_at FROM outreach WHERE id=?", (send_outreach_id,)).fetchone()
+    check("a successful send transitions the outreach row to SENT_BY_USER via A9's state machine",
+          row["state"] == "SENT_BY_USER" and row["user_sent_at"] is not None)
+
+    already_sent_raised = False
+    try:
+        a9send.send_approved_draft(conn, fake_service, send_outreach_id, confirmed=True)
+    except ValueError:
+        already_sent_raised = True
+    check("re-sending an already-SENT_BY_USER outreach is refused (not DRAFTED anymore)",
+          already_sent_raised)
+    check("no second send call reached the service on the refused re-send",
+          len(fake_service.send_calls) == 1)
+
+    # a separate company — send_company_id already has outreach from above,
+    # and F4's 21-day per-company cooldown would otherwise refuse this one
+    # for a reason unrelated to what's being tested here.
+    conn.execute(
+        "INSERT INTO company (name, domain, is_conflict_of_interest, created_at, updated_at) "
+        "VALUES ('EmlTestCo', 'razorpay.com', 0, ?, ?)", (now, now),
+    )
+    eml_company_id = conn.execute("SELECT id FROM company WHERE name='EmlTestCo'").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO authority_node (company_id, person_name, source, seniority_band, created_at) "
+        "VALUES (?, 'Eml Node', 'user_manual_entry', 'function_owner', ?)",
+        (eml_company_id, now),
+    )
+    eml_node_id = conn.execute("SELECT id FROM authority_node WHERE person_name='Eml Node'").fetchone()["id"]
+    eml_channel_id = _write_test_channel(conn, eml_node_id, "emltest@razorpay.com")
+    eml_result = a8.draft_outreach(conn, eml_company_id, eml_node_id, eml_channel_id,
+                                    "Short subject", "A short, valid body.",
+                                    "Company just launched X, per their own newsroom",
+                                    gmail_service=None, job_id="eml-test-job")
+    eml_outreach_id = eml_result["outreach_id"]
+    check("test fixture: an .eml-fallback outreach (no Gmail draft) exists",
+          eml_result.get("draft_gmail_id") is None)
+    check("list_pending_review excludes .eml-fallback rows (nothing to send via Gmail)",
+          not any(p["id"] == eml_outreach_id for p in a9send.list_pending_review(conn)))
+    eml_send_raised = False
+    try:
+        a9send.send_approved_draft(conn, fake_service, eml_outreach_id, confirmed=True)
+    except ValueError:
+        eml_send_raised = True
+    check("send_approved_draft refuses an .eml-fallback outreach (no Gmail draft to send)",
+          eml_send_raised)
+
+    os.environ["CI"] = "true"
+    ci_send_raised = False
+    try:
+        a9send.send_approved_draft(conn, fake_service, send_outreach_id, confirmed=True)
+    except RuntimeError:
+        ci_send_raised = True
+    finally:
+        del os.environ["CI"]
+    check("send_approved_draft refuses to run at all when CI env var is set (F7)", ci_send_raised)
 
 print(f"\n{'ALL PASS' if failures == 0 else f'{failures} FAILURE(S)'}")
 sys.exit(1 if failures else 0)

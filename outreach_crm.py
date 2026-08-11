@@ -103,28 +103,43 @@ def mark_sent(conn, outreach_id, sent_at=None):
 
 
 def detect_sent_via_gmail(service, conn):
-    """gmail.readonly only — reads label state, never sends anything. A
-    DRAFTED outreach whose stored gmail_message_id no longer carries the
-    DRAFT label (and does carry SENT) was sent by you outside this
-    pipeline, exactly as designed (F1: only a human ever sends). Rows
-    without a gmail_message_id (the .eml fallback path) are skipped —
-    mark_sent() is the only path in for those. Returns the outreach_ids
+    """gmail.readonly only — reads label state, never sends anything.
+
+    Matches by gmail_thread_id, NOT gmail_message_id. Confirmed live
+    (2026-08-10) that Gmail reassigns a NEW message id when a draft is
+    sent — true both for a human manually clicking Send in the Gmail web
+    UI and for the live send call in outreach_send.py. Only the thread id
+    survives the draft->sent transition. An
+    earlier version of this function matched on the stored message id and
+    could never fire: every real send 404'd against that stale id and was
+    silently swallowed, leaving the row stuck at DRAFTED forever. Rows
+    without a gmail_thread_id (the .eml fallback path) are skipped —
+    mark_sent() is the only path in for those. On a match, gmail_message_id
+    is updated to the real sent message's id. Returns the outreach_ids
     transitioned."""
     moved = []
     rows = conn.execute(
-        "SELECT * FROM outreach WHERE state = 'DRAFTED' AND gmail_message_id IS NOT NULL"
+        "SELECT * FROM outreach WHERE state = 'DRAFTED' AND gmail_thread_id IS NOT NULL"
     ).fetchall()
     for row in rows:
         try:
-            msg = service.users().messages().get(
-                userId="me", id=row["gmail_message_id"], format="minimal").execute()
+            thread = service.users().threads().get(
+                userId="me", id=row["gmail_thread_id"], format="minimal").execute()
         except Exception:
-            continue  # message id gone (draft discarded) — leave as DRAFTED, not an error
-        labels = set(msg.get("labelIds") or [])
-        if "DRAFT" not in labels and "SENT" in labels:
-            update_outreach_state(conn, row["id"], "SENT_BY_USER",
-                                   reason="gmail_sent_label_detected")
-            moved.append(row["id"])
+            continue  # thread id gone (draft discarded) — leave as DRAFTED, not an error
+        sent_message = None
+        for m in thread.get("messages") or []:
+            labels = set(m.get("labelIds") or [])
+            if "SENT" in labels and "DRAFT" not in labels:
+                sent_message = m
+                break
+        if sent_message is None:
+            continue
+        conn.execute("UPDATE outreach SET gmail_message_id = ? WHERE id = ?",
+                     (sent_message["id"], row["id"]))
+        update_outreach_state(conn, row["id"], "SENT_BY_USER",
+                               reason="gmail_sent_label_detected")
+        moved.append(row["id"])
     return moved
 
 

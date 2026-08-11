@@ -181,8 +181,8 @@ freshness_banner()
 # re-check it here if the extension is ever reinstalled or repackaged.
 EXTENSION_ID = "ngokbgjnigblebajkjihiapolkpllhki"
 
-tab_queue, tab_status, tab_learn, tab_run, tab_filters = st.tabs(
-    ["📋 Review queue", "🧭 Status", "🧠 Learning", "🚀 Run now", "⚙️ Filters"])
+tab_queue, tab_status, tab_learn, tab_run, tab_filters, tab_outreach = st.tabs(
+    ["📋 Review queue", "🧭 Status", "🧠 Learning", "🚀 Run now", "⚙️ Filters", "📤 Outreach review"])
 
 # ------------------------------------------------------------ Review queue
 with tab_queue:
@@ -678,3 +678,59 @@ with tab_filters:
         with open(ROOT / "config.yaml", "w", encoding="utf-8") as fh:
             yaml.safe_dump(cfg, fh, sort_keys=False, allow_unicode=True)
         st.success("config.yaml updated.")
+
+# ---------------------------------------------------------- Outreach review
+with tab_outreach:
+    st.caption(
+        "Career Agent (A8/A9) outreach drafts. Every send here is one explicit "
+        "click by you on the exact draft shown below — nothing sends on its "
+        "own. Full auto-send was asked for and declined; see CLAUDE.md's "
+        "2026-08-10 entry for why."
+    )
+    try:
+        import outreach_store as ca_store
+        import outreach_crm as ca_crm
+        import outreach_send as ca_send
+    except ImportError as e:
+        st.info(f"Career Agent modules not available ({e}).")
+    else:
+        if not os.path.exists(ca_store.DB_PATH):
+            st.info("No career_agent.sqlite3 yet — nothing to review. Run "
+                     "company_targeting.py / authority_graph.py / outreach.py first.")
+        else:
+            with ca_store.connect() as _conn:
+                pending = ca_send.list_pending_review(_conn)
+            if not pending:
+                st.success("No drafts waiting for review.")
+            else:
+                st.write(f"**{len(pending)} draft(s) waiting for review.**")
+                for row in pending:
+                    label = (f"{row['company_name']} — "
+                              f"{row.get('person_name') or 'unknown contact'} — {row['subject']}")
+                    with st.expander(label):
+                        st.write(f"**To:** {row.get('to_email') or '(unknown)'}")
+                        st.write(f"**Subject:** {row['subject']}")
+                        st.text_area("Body", row["body"], height=150,
+                                     key=f"body_{row['id']}", disabled=True)
+                        c1, c2 = st.columns(2)
+                        if c1.button("✅ Approve & send", key=f"approve_{row['id']}"):
+                            try:
+                                import gmail_auth as ca_gmail_auth
+                                service = ca_gmail_auth.get_service()
+                            except Exception as e:
+                                st.error(f"Gmail auth failed: {e}")
+                            else:
+                                try:
+                                    with ca_store.connect() as _conn2:
+                                        ca_send.send_approved_draft(
+                                            _conn2, service, row["id"], confirmed=True)
+                                    st.success("Sent.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Send failed: {e}")
+                        if c2.button("🚫 Reject", key=f"reject_{row['id']}"):
+                            with ca_store.connect() as _conn2:
+                                ca_crm.update_outreach_state(
+                                    _conn2, row["id"], "CLOSED", reason="rejected_at_review")
+                            st.info("Rejected — moved to CLOSED, not sent.")
+                            st.rerun()

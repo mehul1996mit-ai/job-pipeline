@@ -20,7 +20,8 @@ from contextlib import contextmanager
 
 import yaml
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "career_agent.sqlite3")
+DB_PATH = os.environ.get("CAREER_AGENT_DB_PATH") or os.path.join(
+    os.path.dirname(__file__), "data", "career_agent.sqlite3")
 POLICY_DIR = os.path.join(os.path.dirname(__file__), "policy")
 
 SCHEMA_SQL = """
