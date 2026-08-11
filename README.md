@@ -81,6 +81,37 @@ fields, no additional cost), which is merged over the deterministic one. A
 failed or empty model response never blanks out a real regex finding, and every
 result records which analyst produced it.
 
+## Seniority judging (`seniority.py`, added 2026-08-10)
+
+Title is a bad seniority signal and this pipeline doesn't pretend otherwise —
+a bank "VP" is typically a ~6-10 year individual-contributor grade (State
+Street, Natwest, Wells Fargo all use it that way, and this pipeline sources
+from banks directly via Workday), while the same title elsewhere means an
+executive. Instead, every posting is judged on the experience it actually
+**requires**, extracted in three explicit trust tiers so a guess is never
+treated as a fact:
+
+- **stated** — a real requirement phrase in the JD ("Experience: 7 years").
+- **repaired** — a mangled range reconstructed. Adzuna's own API ships
+  ranges with the separator stripped (`"Experience: 48 years"` means 4-8,
+  `"810"` means 8-10) — verified against their live API and raw response
+  bytes, not this pipeline's bug, just inherited mess.
+- **inferred** — no number anywhere; a band implied by title wording only
+  (e.g. bare "VP" → 6-14y, "AVP" → 7-13y). Judged on the band's **centre**,
+  not its floor — a floor-only read systematically under-calls seniority.
+
+A posting judged `over_senior` against `profile.comfort_max_years` (your own
+ceiling, default 8) takes a configurable score penalty
+(`profile.over_senior_penalty`, default 25) — enough to usually drop it below
+`filters.min_score_to_tailor` and out of the digest's top-N, but it's a
+**penalty, not a filter**: the row stays in the CSV with its verdict and
+confidence visible (`exp_verdict`/`exp_confidence`/`exp_required`/`exp_why`
+columns), never silently deleted on what might be an inferred guess. The
+same standing-guard discipline as the frozen scorer applies here: real
+company-age text ("P&G was founded over 180 years ago") must never read as a
+job requirement, and that's a permanent smoke-test assertion, not a one-off
+fix.
+
 ## Rating matches, and the learning loop (`feedback.py`)
 
 Every queued job carries a `match_feedback` column you set in the dashboard —
@@ -246,19 +277,24 @@ A separate capability layered onto this same repo (not a new project — see
 `CLAUDE.md`'s 2026-08-04 entry for why extending in place beat a new repo):
 instead of waiting for a job posting, it finds companies worth targeting,
 identifies who actually owns hiring for a role there, and prepares outreach
-as a Gmail **draft** for you to review and send yourself. Same submission
-boundary as the rest of this README, restated for outreach specifically:
-**this never calls Gmail's send API, ever — only `drafts.create`.**
+as a Gmail **draft** for your review. The submission boundary from the rest
+of this README still holds, restated precisely for outreach (updated
+2026-08-10 — see below): **a message only ever sends after one explicit
+human click on that exact draft, in the "📤 Outreach review" dashboard tab
+— never unattended, never batched without a look, never on a schedule.**
+Full auto-send was asked for and explicitly declined; see `CLAUDE.md`'s
+2026-08-10 entry for the reasoning.
 
 | Stage | Module(s) | What happens |
 |---|---|---|
 | A2 Company Targeting | `company_targeting.py` | Force-includes every company in `policy/company_allowlist.yaml` (a 147-company guaranteed floor across BFSI/fintech categories) plus anything discovered elsewhere, scores each on real hiring-activity signal from this pipeline's own `data/seen_jobs.json` — the other 4 spec'd signals (cluster-fit, sub-sector, size, geography, growth) have no data source yet and contribute 0 rather than a guessed number. Your current employer is flagged `is_conflict_of_interest` and excluded from outreach downstream regardless of score. |
 | A3 Hiring Authority Graph | `authority_graph.py`, `policy/network.yaml` | Ranks people by who **owns the requisition** — function/P&L owner > hiring manager > function-specific TA > generic HR — not by title alphabet. Node discovery is restricted to public non-scraped sources (company pages, press releases, regulatory filings, speaker bios, bylines) or your own manual entry; no LinkedIn scraping, ever. `warm_path_distance` only ever comes from `network.yaml`, which you edit by hand — never inferred by traversing anything. |
 | A5 Contact Resolution | `contact_resolution.py`, `policy/contact_allowlist.yaml` | A contact enters the outreach queue only with a real `consent_basis` (careers page, JD-listed email, a channel you already have a relationship through, etc.) — pattern-guessed addresses (`first.last@company.com`) are structurally impossible to write, not just discouraged. Every candidate is gated on RFC-5322 syntax, a real MX record (DNS lookup only, never an SMTP probe), and a domain that actually matches the company. **Most people don't have a findable, consented contact — the resolver returning nothing is the normal, expected outcome**, not a failure. |
-| A8 Outreach Composer | `outreach.py`, `gmail_auth.py` | Creates a Gmail **draft** (OAuth scope is `gmail.compose` + `gmail.readonly` only — verified by a standing repo-wide grep test that `gmail.send` never appears anywhere) once every precondition holds: not a conflict-of-interest company, channel confidence ≥0.6, not on the suppression list, ≤20 drafts/day and ≥21 days since the last outreach to that company (both hard-clamped in code — `config.yaml` can lower these caps, never raise them), and for cold company-centric outreach specifically, a hiring-authority node with real ownership likelihood and a plausible warm path. Falls back to writing `.eml` files under `out/drafts/` if Gmail access is ever blocked. |
-| A9 CRM & Calibration | `outreach_crm.py` | Tracks what actually happens after a draft becomes a real, human-sent email: a validated state machine (DRAFTED→SENT_BY_USER→REPLIED→INTERVIEW/REJECTED→CLOSED) that logs every hop as an `event`; sent/reply detection using the `gmail.readonly` scope already granted to A8 (reads label state and thread messages only, never sends/modifies); a follow-up scheduler bounded by the same F4 caps as A8; and the "30-day weight refit" `authority_graph.py` has referenced since A3 — once ≥20 real outreach outcomes exist (≥4 per node type), proposes adjusted `NODE_TYPE_BASE_LIKELIHOOD` priors from observed reply rates. Same two hard rules as `feedback.py`'s learning loop: never auto-applies, never concludes below the floor. An explicit do-not-contact close (not a plain rejection or no-reply) auto-suppresses that channel. |
+| A8 Outreach Composer | `outreach.py`, `gmail_auth.py` | Creates a Gmail **draft** once every precondition holds: not a conflict-of-interest company, channel confidence ≥0.6, not on the suppression list, ≤20 drafts/day and ≥21 days since the last outreach to that company (both hard-clamped in code — `config.yaml` can lower these caps, never raise them), and for cold company-centric outreach specifically, a hiring-authority node with real ownership likelihood and a plausible warm path. Falls back to writing `.eml` files under `out/drafts/` if Gmail access is ever blocked. |
+| A9 CRM & Calibration | `outreach_crm.py` | Tracks what actually happens after a draft becomes a real, human-sent email: a validated state machine (DRAFTED→SENT_BY_USER→REPLIED→INTERVIEW/REJECTED→CLOSED) that logs every hop as an `event`; sent/reply detection using the `gmail.readonly` scope (reads label state and thread messages only, never sends/modifies); a follow-up scheduler bounded by the same F4 caps as A8; and the "30-day weight refit" `authority_graph.py` has referenced since A3 — once ≥20 real outreach outcomes exist (≥4 per node type), proposes adjusted `NODE_TYPE_BASE_LIKELIHOOD` priors from observed reply rates. Same two hard rules as `feedback.py`'s learning loop: never auto-applies, never concludes below the floor. An explicit do-not-contact close (not a plain rejection or no-reply) auto-suppresses that channel. |
+| Outreach review & send | `outreach_send.py`, dashboard "📤 Outreach review" tab | The ONLY code path anywhere allowed to call Gmail's send API — `send_approved_draft()` refuses without an explicit `confirmed=True`, which only the dashboard's "Approve & send" button ever passes, and refuses for anything that isn't a DRAFTED outreach with a real Gmail draft. Sends the EXISTING reviewed draft as-is (never recomposes it), then hands the state transition to A9. A standing whitelist test (`career_agent_smoke_test.py`, F1) confines the send scope string to `gmail_auth.py` and the live send call to this one file. |
 
-**Current real state (2026-08-09), read before assuming this is generating outreach today:** A2/A3/A5/A8/A9 are all built and tested (88 checks in `career_agent_smoke_test.py`), and A8 is live-verified against a real Gmail account (`mehul.96.mit@gmail.com`, OAuth working end-to-end, one real test draft created and confirmed via the API). **There are zero real contacts or sent outreach in the system** — a genuine research pass across the companies with verified hiring-authority nodes found no automatable, verified contact for any of them, which is the expected honest outcome given how few companies publish that. A9's reply detection and weight refit are real and unit-tested against synthetic fixtures, but report the honest "nothing yet" against the live database — that's correct, not a bug, until a real contact and a real send exist. Outreach only starts once you supply a contact yourself (`user_existing_relationship`/`user_network_referral` in `policy/contact_allowlist.yaml`'s terms) or a real job posting surfaces an apply-by-email address.
+**Current real state (2026-08-10), read before assuming this is generating outreach today:** A2/A3/A5/A8/A9 plus the send-review flow are all built and tested (103 checks in `career_agent_smoke_test.py`), and A8/OAuth are live-verified against a real Gmail account (`mehul.96.mit@gmail.com`). **There are zero real contacts or sent outreach in the system** — a genuine research pass across the companies with verified hiring-authority nodes found no automatable, verified contact for any of them, which is the expected honest outcome given how few companies publish that. A9's reply detection and weight refit are real and unit-tested against synthetic fixtures, but report the honest "nothing yet" against the live database — that's correct, not a bug, until a real contact and a real send exist. Outreach only starts once you supply a contact yourself (`user_existing_relationship`/`user_network_referral` in `policy/contact_allowlist.yaml`'s terms) or a real job posting surfaces an apply-by-email address.
 
 Run: `python company_targeting.py` (A2) → `python authority_graph.py` (A3, reports existing nodes — discovery is manual research, see module docstring) → `python outreach_crm.py` (A9, prints refit readiness + due follow-ups, runs Gmail sent/reply detection if `gmail_auth` is set up) — contact resolution and outreach itself are still called programmatically (`contact_resolution.resolve_contact()`, `outreach.draft_outreach()`), no CLI wrapper yet. Full build history and every debugged gotcha (OAuth Cloud-Console bot-detection, the Google Auth Platform UI's Test-users location, WebSearch summaries that turned out wrong on verification) is in `CLAUDE.md`'s STATUS block, 2026-08-04 through 2026-08-09 entries.
 
@@ -331,6 +367,13 @@ Everything lives in `config.yaml`:
   `sources/serpapi_jobs.py`, sized to fit the free tier's 250 searches/month.
 - `filters.title_keywords` — allowlist; a listing needs one in its title.
 - `filters.cities` — allowlist (empty = all cities); "remote" always passes.
+  Widened 2026-08-10 to add Hyderabad/Delhi/Gurugram/Gurgaon/Noida/Chennai
+  alongside Pune/Mumbai/Bangalore — real run logs showed ~520 jobs/day
+  already clearing every other filter, so geography was the actual volume
+  bottleneck, not relevance.
+- `profile.comfort_max_years` / `profile.stretch_years` /
+  `profile.over_senior_penalty` — the seniority-judging thresholds, see
+  "Seniority judging" above.
 - `filters.min_salary_annual` — enforced ONLY when a listing reports salary.
 - `filters.min_score_to_tailor` — jobs below this score (default 50, using the
   structured score — see "Fit scoring" above) stay in the CSV/digest but don't

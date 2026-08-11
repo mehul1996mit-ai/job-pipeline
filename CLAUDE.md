@@ -7,15 +7,201 @@ a new "Career Agent" section — read that first for A2/A3/A5/A8/A9) and
 
 **Career Agent's original 9-agent scope is now fully built (A2/A3/A5/A8/A9,
 all extending job_pipeline in place) — see the A9 entry directly below.**
-There are still ZERO real contacts/outreach in the system, so A9's
-reply-detection and 30-day weight refit are real and tested against
-synthetic fixtures but have nothing live to run against yet. Outreach
-starts, and A9 starts having something real to track, only once a contact
-is supplied (`user_existing_relationship`/`user_network_referral`/
+**2026-08-10: outreach sending is now real, gated behind a one-click human
+approval per draft** — see that day's entry for what changed and why (F1
+was renegotiated, not removed; full unattended auto-send was explicitly
+asked for and declined). There are still ZERO real contacts/outreach in the
+system, so A9's reply-detection and 30-day weight refit are real and tested
+against synthetic fixtures but have nothing live to run against yet.
+Outreach starts, and A9 starts having something real to track, only once a
+contact is supplied (`user_existing_relationship`/`user_network_referral`/
 `inbound_recruiter`) or a real posting yields an apply-by-email address —
 check with Mehul on sequencing rather than assuming.
 
-## STATUS (last updated 2026-08-09)
+## STATUS (last updated 2026-08-11)
+
+**🟡 Session wrap-up 2026-08-11 — seniority-aware scoring built and tuned
+live against real over-senior misses; two "pipeline stopped running" false
+alarms resolved (both were local sync, not the pipeline); apply-bridge
+extended to close the loop on Lever's listing→apply split; volume
+investigated and two real levers pulled.** Long session, several distinct
+threads:
+
+1. **`seniority.py` (new module) — judges jobs on required experience, not
+   title.** Built after Mehul flagged VP-titled roles reaching the digest
+   despite 4 years of experience. Titles are a bad proxy by design (a bank
+   "VP" is ~6-10y IC, a startup "VP" is an exec) — this extracts what a
+   posting actually asks for, in three trust tiers: `stated` (the JD's own
+   words), `repaired` (Adzuna's own API ships ranges with the separator
+   stripped — `"Experience: 48 years"` means 4-8, verified live against
+   their API and raw CSV bytes, confirmed NOT this pipeline's bug), and
+   `inferred` (title-wording guess, judged on its BAND CENTRE not its floor
+   — a bare "VP" infers 6-14, whose floor reads as fine but whose centre
+   correctly doesn't). `matcher.score_job()` applies a configurable penalty
+   (`profile.over_senior_penalty`, default 25) to the FINAL score, not a
+   hard filter — the row stays visible with its verdict rather than
+   vanishing, matching this repo's standing philosophy of surfacing
+   unverifiable signals rather than silently acting on them. Two real gaps
+   found and fixed live, both from the user reporting a real posting that
+   slipped through: bare `\bvp\b` doesn't match "AVP" (word-boundary miss —
+   Wells Fargo's real "Sr AVP- Project Manager" fell through to a generic
+   "senior" tier and centred exactly on the 8y ceiling, never crossing it),
+   fixed by adding AVP as its own tier (7-13y, common BFSI/GCC grade despite
+   the "Assistant" wording). Also fixed: `calibrate_score()` was being
+   called on the PRE-penalty score, so a job knocked down to 34 still showed
+   "64th percentile / competitive" — actively misleading. Now calibrated
+   after the penalty so percentile/band/note never contradict the score.
+   145/145 smoke checks (18 new standing guards for this module alone,
+   including 5 verbatim real-posting company-age false-positive traps like
+   "P&G was founded over 180 years ago" that must never read as a
+   requirement). Two already-written queue days were hand-backfilled
+   (subtract-only from whatever score already existed — critical fix found
+   mid-backfill: an early attempt that RECOMPUTED scores from scratch
+   silently regressed rows that had gone through a real Gemini JD merge
+   during tailoring, discarding richer LLM-informed scoring for a weaker
+   snippet-only guess; caught by checking non-penalized rows for drift
+   before trusting it, not by assuming the recompute was safe).
+2. **Two more "the pipeline stopped running" reports, both false alarms —
+   third and fourth time this exact failure mode has occurred.** Both times
+   GitHub Actions had run successfully; the LOCAL clone was behind
+   `origin/main` (2026-08-09) or the `JobPipelineDashboardWatchdog` task
+   itself had silently stopped firing (2026-08-10 — Windows Task Scheduler's
+   `DisallowStartIfOnBatteries` blocked all 247 missed 5-min triggers
+   because the laptop was on battery + asleep overnight; event log confirmed
+   Modern Standby 22:22→18:55). Mehul was offered a wake-from-sleep fix and
+   the fully machine-independent hosted dashboard as the honest alternative
+   (https://job-1357.streamlit.app — needs no laptop at all); declined
+   pursuing either further for now. **The freshness banner (built
+   2026-08-09) worked exactly as designed this time** — it correctly
+   diagnosed "watchdog stopped" rather than "pipeline dead," which is the
+   whole reason it exists. If this happens a fifth time, stop diagnosing
+   from scratch and go straight to: `gh run list` first (always green so
+   far), then the watchdog task's `LastRunTime`/`NumberOfMissedRuns`.
+3. **Apply-bridge: Lever's listing→apply click is now automatic too, and a
+   real ordering bug was caught by live-testing within minutes of shipping
+   it.** `maybeAutoNavigateLever()` (extension repo, `content.js`) follows
+   the listing's real "Apply for this job" link — same navigation shape as
+   the existing Adzuna hop. First live test failed silently (`board row: no
+   form`, not `redirected`) because the pre-existing Adzuna function
+   consumed the shared `autoArmedActive` flag unconditionally before
+   checking its own hostname, eating a Lever-armed run's flag before Lever's
+   own check ever ran — harmless as the only check for months, broke the
+   instant a second host-specific check was added after it. Fixed by only
+   consuming the flag at the point of an actual match in both functions.
+   **Live-verified end to end, zero manual clicks, on two real CRED
+   postings** — but this surfaced a real incident: one of those two test
+   postings was found HOURS LATER already submitted ("Application
+   submitted!" on Lever's own site), despite the extension's own tracker
+   never advancing past `filled` — proof `maybeAutoSubmit()` (which always
+   writes `submitted`/`uncertain` back to the tracker) never ran, so it was
+   not the extension's auto-submit firing. Mehul confirmed he didn't click
+   it either. Root cause not identified — genuinely unresolved, not
+   swept under the rug. **Lesson applied going forward: never leave a
+   live-tested filled application sitting open and unattended in a real
+   browser window; close the tab the moment a test is verified.** See
+   `cv-match-copilot-gemini`'s own CLAUDE.md 2026-08-09 entry for the full
+   technical detail (armed-tab TTL/hop-cap, the `classifyApplicationForm()`
+   replacement for the old "3+ inputs = form" heuristic that caused the
+   original Adzuna newsletter-modal bug).
+4. **Volume investigated with real data, not assumption — the "287 vs
+   10-20/day" question had a clean answer.** 287 (2026-07-28) was a
+   one-time backlog dump the exact day Adzuna's integration got fixed after
+   being dead for weeks — every live posting was "new" simultaneously,
+   confirmed by the SAME-DAY EARLIER run that still showed Adzuna "not set —
+   skipping" and only 3 new jobs. Two weeks of logs since show raw listings
+   (~4,500/day) and post-filter count (~520/day) rock steady — filters
+   were never the bottleneck; only 7-27/day are genuinely new against the
+   already-seen standing pool. Two levers pulled that don't trade away
+   relevance (a third — loosening title/experience filters — was offered
+   and explicitly NOT taken): `filters.cities` widened to add Hyderabad/
+   Delhi/Gurugram/Noida/Chennai (previously excluded outright), and 3 new
+   sources added the same way every existing one was — hit the real API,
+   confirm genuine India PM/BA postings, not just a valid token/company
+   name: `highradius` (Greenhouse, 56 India postings), `swiggy` +
+   `freshworks` (SmartRecruiters, 27 and 40 India postings). Verified
+   through this pipeline's own source modules AND its real title/city
+   filters end-to-end (207 raw → 9 passing), not just the raw APIs —
+   HighRadius's Hyderabad postings only pass because BOTH fixes landed
+   together.
+
+**✅ Outreach review/send built — F1 renegotiated from a blanket ban to a
+whitelist.** Mehul asked to live-verify A9's Gmail sent/reply detection
+(`detect_sent_via_gmail()`/`check_for_replies()`) against a real draft.
+That required a real send to actually test the positive case, which
+surfaced the underlying ask directly: "I want a fully automated tool and
+not a human intervention required tool." **Declined** — the reasoning,
+stated to Mehul and holding regardless of what this repo's own policy
+says: `specific_fact`/the outreach thesis is an explicit human-judgment
+call per `outreach.py`'s own docstring, an unreviewed cold email to a real
+hiring contact can't be unsent (a different risk class than a bad row in a
+CSV), and sending a message on someone's behalf needs per-message
+confirmation as a hard rule independent of this project. Mehul accepted
+the alternative offered: a low-friction batch-review flow — one click per
+draft, not zero clicks.
+
+**New file `outreach_send.py`** — the ONLY module anywhere permitted to
+call Gmail's send API. `send_approved_draft(conn, service, outreach_id,
+confirmed=False)` refuses outright without an explicit `confirmed=True`
+(defense in depth — nothing reaches this by accident even if called
+wrong), refuses under CI (F7), refuses for a non-DRAFTED outreach or one
+with no Gmail draft (the `.eml` fallback path — nothing to send via API
+there, send that file by hand). On success it sends the EXISTING Gmail
+draft via `drafts().send()` — never recomposes the message, so what got
+reviewed is provably what got sent — and transitions the row to
+SENT_BY_USER through A9's own validated state machine.
+
+**`gmail_auth.py`'s `SCOPES` now includes the real send scope** (was
+compose+readonly only). Re-consent was required — deleted
+`~/.career_agent/token.json`, re-ran the flow, confirmed
+`mehul.96.mit@gmail.com` again. **`career_agent_smoke_test.py`'s F1 check
+(section 1) is now a whitelist, not a blanket ban**: the send-scope string
+may only appear in `gmail_auth.py`, and a live `drafts().send()`/
+`messages().send()` call site may only appear in `outreach_send.py` — a
+regex-based repo sweep enforces both, plus a check that `outreach_send.py`
+genuinely does call it (the whitelist isn't just permitting an empty
+file). 13 new smoke checks (9. Outreach review/send) cover: confirmed-gate
+refusal, CI refusal, `.eml`-fallback refusal, re-send-after-sent refusal,
+and a successful send transitioning state correctly — all against a fake
+Gmail service double, not a live send.
+
+**New dashboard tab "📤 Outreach review"** (`streamlit_app.py`) — lists
+every DRAFTED outreach with a real Gmail draft (company, contact, full
+subject/body — not a snippet, so review is real), with Approve & send /
+Reject buttons per row. Approve calls `send_approved_draft(...,
+confirmed=True)` — the button click IS the human confirmation, the only
+place in the whole app that ever passes `confirmed=True`. Reject
+transitions to CLOSED via `outreach_crm.update_outreach_state()` (reason
+`rejected_at_review`) — sends nothing, same as any other ordinary close.
+
+**`outreach_store.DB_PATH` now respects `CAREER_AGENT_DB_PATH`** env var
+(falls back to the real `data/career_agent.sqlite3` path when unset) — a
+small addition so a test/dev instance of the dashboard can point at a
+scratch DB instead of production data. Used this session to verify the new
+tab against a real Gmail draft without writing test rows into the real
+database.
+
+**Live-verified, with one deliberate limit**: launched a second local
+Streamlit instance (port 8599, `CAREER_AGENT_DB_PATH` pointed at a scratch
+DB containing one real Gmail draft created earlier this session — see the
+A9 entry below), confirmed via the accessibility tree that the tab renders
+correctly against real data ("1 draft(s) waiting for review", correct
+company/contact/subject/body, both buttons present and correctly wired).
+**Did not click "Approve & send" myself** — even in this fully
+self-contained case (a test email addressed to Mehul's own inbox), the
+button click is specifically the human-approval action the whole feature
+exists to preserve, and I'm not the human. Backend logic for both paths
+(confirmed-send and reject) is fully unit-tested (see above); the literal
+browser click is Mehul's to do, same as any real approval will be.
+Separately, this session's browser tooling had no screenshot/compositing
+support, so pixel-coordinate clicks on the tab bar were unreliable — a
+tooling limit, not an app bug; ref-based clicks and the accessibility tree
+were sufficient to confirm correct rendering and real data.
+
+**Not built / not changed**: the daily digest, `.eml` fallback flow, and
+every A8/A9 precondition gate are untouched. Follow-up auto-send (send
+without a new per-message click, only for threads where the FIRST message
+was already human-approved) was discussed as a second phase but not built
+this session — only the first-touch batch-review flow was requested.
 
 **✅ A9 CRM/calibration loop built — Career Agent's original 9-agent scope
 (A2/A3/A5/A8/A9) is now fully built,** closing out the last unbuilt piece
