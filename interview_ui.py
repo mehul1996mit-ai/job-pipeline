@@ -8,8 +8,11 @@ readiness T§9, mock interview T§10) — none of that exists yet, so those
 screens are NOT built here; a plain note explains why rather than shipping
 a screen with no real data behind it. Company/segment research (T§11) is
 the same story. What IS built: the process switcher (T§14) and the full
-🎯 Prepare screen (E§4) — read-through queue, answer editor with the
-fill-in-blank device, fact review queue (E§6).
+🎯 Prepare surface (E§4) — read-through queue, answer editor with the
+fill-in-blank device, fact review queue (E§6) — reorganized into five
+role-scoped tabs (Overview / Resume Claims / Question Bank / Story Bank /
+Fact Review) so a single long scrolling page doesn't stand in for real
+navigation.
 
 Token system (§1 of the UI master prompt) is injected once via
 _inject_css(). Streamlit's text_area can't render inline styled HTML while
@@ -28,6 +31,7 @@ import interview_store
 import interview_prep
 import interview_stories
 import interview_answers
+import interview_question_bank as qb
 
 
 # ---------------------------------------------------------------- token CSS
@@ -75,6 +79,13 @@ def _inject_css():
         border-radius: 3px; font-family: 'Courier New', monospace; font-size: 0.8rem;
         border: 1px solid var(--brass);
     }
+    .ib-progress-track {
+        background: rgba(176,141,62,0.15); border-radius: 4px; height: 10px;
+        overflow: hidden; margin: 0.35rem 0;
+    }
+    .ib-progress-fill { background: var(--brass); height: 100%; }
+    .ib-focus-group { margin-bottom: 1rem; }
+    .ib-focus-title { font-weight: 600; margin-bottom: 0.1rem; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -173,7 +184,6 @@ def _process_switcher(conn):
         if idx is not None:
             st.session_state["ib_process_radio"] = idx
 
-    cols = st.columns([1] * max(len(processes), 1) + [1])
     labels = []
     for p in processes:
         days = _days_to(p["scheduled_date"])
@@ -247,25 +257,78 @@ def _fit_rollup(conn, process_id):
     return round(100 * weighted / total_w)
 
 
-# --------------------------------------------------------------- prep topics
+# ------------------------------------------------------------ progress bar
 
-def _render_prep_topics(conn, process_id):
-    topics = conn.execute(
-        """SELECT topic_text, source, priority, rationale FROM prep_topic
-           WHERE process_id = ? ORDER BY priority DESC LIMIT 12""",
-        (process_id,)).fetchall()
-    if not topics:
-        st.caption("No prep topics yet for this process.")
+def _progress_bar(conn, process_id):
+    """Honest generated/total coverage across every question this process
+    could have an answer for (claim questions + metric defense + the FULL
+    base bank, not just the top-10 ranked slice) -- a genuine count, never
+    a fabricated readiness/confidence score. Same discipline this repo
+    already applies to the fit rollup above."""
+    claim_total = conn.execute("SELECT COUNT(*) AS n FROM claim_question").fetchone()["n"]
+    metric_total = conn.execute("SELECT COUNT(*) AS n FROM metric_defense").fetchone()["n"]
+    base_total = len(qb.BASE_QUESTIONS)
+    total = claim_total + metric_total + base_total
+    if not total:
         return
-    st.markdown('<div class="ib-label">What to prioritize</div>', unsafe_allow_html=True)
+    rows = conn.execute(
+        """SELECT draft_status, review_depth FROM prepared_answer_version
+           WHERE process_id=? AND superseded_by IS NULL""", (process_id,)).fetchall()
+    generated = len(rows)
+    reviewed = sum(1 for r in rows if r["review_depth"] in ("edited", "rewritten"))
+    pct = round(100 * generated / total)
+    st.markdown('<div class="ib-label">Preparation coverage</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="ib-progress-track"><div class="ib-progress-fill" style="width:{pct}%"></div></div>'
+        f'<div style="font-size:0.85em;opacity:0.8">{generated} of {total} questions drafted '
+        f'({pct}%) · {reviewed} reviewed or rewritten by you. Not a readiness score — just a '
+        f'count of what exists vs. what you\'ve looked at.</div>',
+        unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------- focus list
+
+_FOCUS_GROUPS = [
+    ("requirement_gap", "🎯 JD requirements to shore up",
+     "This JD asks for it and it isn't clearly on your resume yet. Prepare it in Resume Claims or Question Bank."),
+    ("high_risk_claim", "⚠️ Claims that need a strong defense",
+     "Carries a number but ownership isn't crystal clear — the exact combination a follow-up exposes. Go to Resume Claims."),
+    ("uncovered_competency", "📖 Competencies with no story yet",
+     "Nothing in your story bank demonstrates this. Go to Story Bank."),
+    ("base_question_bank", "💬 Recommended standard questions",
+     "Highest-fit standard questions for this specific role. Starred ⭐ in Question Bank."),
+]
+
+
+def _focus_list(conn, process_id):
+    topics = conn.execute(
+        """SELECT topic_text, source, priority FROM prep_topic
+           WHERE process_id = ? ORDER BY priority DESC""", (process_id,)).fetchall()
+    if not topics:
+        st.caption("No focus items yet for this process.")
+        return
+    grouped = {}
     for t in topics:
-        rationale = f"<div style='opacity:0.75;font-size:0.85em;margin-top:0.2em'>{html.escape(t['rationale'])}</div>" \
-            if t["rationale"] else ""
-        st.markdown(
-            f'<div class="ib-card" style="padding:0.6rem 1rem;">'
-            f'<span class="ib-chip ib-chip-neutral">{t["source"].replace("_"," ")}</span>'
-            f'{html.escape(t["topic_text"])}{rationale}</div>',
-            unsafe_allow_html=True)
+        grouped.setdefault(t["source"], []).append(t)
+
+    st.markdown('<div class="ib-label">Focus list — what to prepare first</div>',
+               unsafe_allow_html=True)
+    any_shown = False
+    for source_key, title, blurb in _FOCUS_GROUPS:
+        items = grouped.get(source_key, [])
+        if not items:
+            continue
+        any_shown = True
+        st.markdown(f'<div class="ib-focus-group"><div class="ib-focus-title">{title}</div>'
+                   f'<div style="font-size:0.82em;opacity:0.7;margin-bottom:0.3em">{blurb}</div>',
+                   unsafe_allow_html=True)
+        for t in items[:5]:
+            st.markdown(f"- {html.escape(t['topic_text'])}")
+        if len(items) > 5:
+            st.caption(f"+ {len(items) - 5} more")
+        st.markdown("</div>", unsafe_allow_html=True)
+    if not any_shown:
+        st.caption("No focus items yet for this process.")
 
 
 # -------------------------------------------------------------- claim picker
@@ -291,9 +354,9 @@ def _metric_defense_questions(conn, claim_id):
 # -------------------------------------------------------------- generation
 
 def _generate_for_claim(conn, process_id, claim_row, master_resume):
-    """Generates BOTH the question tree (T§4.4) and, if this claim carries a
-    metric, the metrics-defense set (T§4.5) — a claim's full preparation
-    surface, not just the question tree."""
+    """Generates BOTH the follow-up question set (T§4.4) and, if this claim
+    carries a metric, the metrics-defense set (T§4.5) — a claim's full
+    preparation surface, not just the question tree."""
     claim = dict(id=claim_row["id"], claim_text=claim_row["claim_text"],
                 source_company=claim_row["source_company"])
     cq = [{"question_ref_id": q["id"], "question_text": q["question_text"],
@@ -345,7 +408,7 @@ def _answer_editor(conn, process_id, question_source, question_ref_id, question_
                                             question_ref_id, edited)
             fact_ids = interview_answers.detect_and_insert_fact_candidates(
                 conn, process_id, row["id"], edited, claim_ref=row["claim_id"])
-            st.success(f"Saved. {len(fact_ids)} fact(s) detected for review below." if fact_ids else "Saved.")
+            st.success(f"Saved. {len(fact_ids)} fact(s) detected for review in the Fact Review tab." if fact_ids else "Saved.")
             conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
                            # manager only commits on normal exit, so this must
                            # happen explicitly before every rerun, or the write
@@ -421,7 +484,7 @@ def _read_through_section(conn, process_id, claim_row, questions, question_sourc
 def _read_through_queue(conn, process_id, claim_row):
     _read_through_section(conn, process_id, claim_row,
                           _claim_questions(conn, claim_row["id"]),
-                          "claim_question", "Question tree")
+                          "claim_question", "Follow-up questions")
     metric_qs = _metric_defense_questions(conn, claim_row["id"])
     if metric_qs:
         _read_through_section(conn, process_id, claim_row, metric_qs,
@@ -438,7 +501,8 @@ def _fact_review_queue(conn, process_id):
     if not pending:
         st.caption("No facts waiting for review.")
         return
-    st.markdown('<div class="ib-label">Fact review queue</div>', unsafe_allow_html=True)
+    st.caption("Every number your edited answers introduce gets checked against your resume. "
+              "Confirm it, correct it, or flag a conflict below.")
     for fc in pending:
         conflicted = fc["status"] == "conflicted"
         border = "var(--flag)" if conflicted else "var(--brass)"
@@ -496,51 +560,34 @@ def _fact_review_queue(conn, process_id):
 # ------------------------------------------------------------ base questions
 
 def _base_question_by_id(qid):
-    import interview_question_bank as qb
     return next((q for q in qb.BASE_QUESTIONS if q["id"] == qid), None)
 
 
-def _base_questions_section(conn, process_id, master_resume):
-    """PM-fundamentals/behavioral/product-sense/target-company/HR questions
-    — the categories the claim-derived tree can't produce. Pulls the
-    already-computed, already-capped selection from prep_topic
-    (source='base_question_bank') rather than recomputing here."""
-    topic_rows = conn.execute(
-        "SELECT source_ref_id, priority FROM prep_topic WHERE process_id=? "
-        "AND source='base_question_bank' ORDER BY priority DESC",
-        (process_id,)).fetchall()
-    if not topic_rows:
-        return
-    st.markdown('<div class="ib-label">Base questions (PM fundamentals, behavioral, '
-               'product sense, target company, HR)</div>', unsafe_allow_html=True)
-    for t in topic_rows:
-        q = _base_question_by_id(t["source_ref_id"])
-        if not q:
-            continue
-        v = _current_version_row(conn, process_id, "base_question", q["id"])
-        label = q["text"]
-        if v:
-            gaps = v["body_text"].count("[YOU FILL:")
-            gap_note = f" · {gaps} blank(s)" if gaps else ""
-            chips = _draft_status_chip(v["draft_status"]) + _review_depth_chip(v["review_depth"])
-            with st.expander(f"{label}{gap_note}"):
-                st.markdown(chips, unsafe_allow_html=True)
-                import interview_question_bank as qb
-                _answer_editor(conn, process_id, "base_question", q["id"], q["text"],
-                               qb.CATEGORY_LABELS.get(q["category"], ""))
-        else:
-            cols = st.columns([5, 1])
-            cols[0].caption(f"○ {label}")
-            if cols[1].button("Generate", key=f"ib_gen_base_{q['id']}"):
-                with st.spinner("Generating…"):
-                    interview_answers.generate_answer_for_question(
-                        conn, process_id, "base_question", q["id"], q["text"],
-                        None, master_resume)
-                conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                               # manager only commits on normal exit, so this must
-                               # happen explicitly before every rerun, or the write
-                               # this button just made is silently lost.
-                st.rerun()
+def _base_question_row(conn, process_id, q, master_resume, starred=False):
+    v = _current_version_row(conn, process_id, "base_question", q["id"])
+    star = " ⭐" if starred else ""
+    label = q["text"]
+    if v:
+        gaps = v["body_text"].count("[YOU FILL:")
+        gap_note = f" · {gaps} blank(s)" if gaps else ""
+        chips = _draft_status_chip(v["draft_status"]) + _review_depth_chip(v["review_depth"])
+        with st.expander(f"{label}{gap_note}{star}"):
+            st.markdown(chips, unsafe_allow_html=True)
+            _answer_editor(conn, process_id, "base_question", q["id"], q["text"],
+                           qb.CATEGORY_LABELS.get(q["category"], ""))
+    else:
+        cols = st.columns([5, 1])
+        cols[0].caption(f"○ {label}{star}")
+        if cols[1].button("Generate", key=f"ib_gen_base_{q['id']}"):
+            with st.spinner("Generating…"):
+                interview_answers.generate_answer_for_question(
+                    conn, process_id, "base_question", q["id"], q["text"],
+                    None, master_resume)
+            conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
+                           # manager only commits on normal exit, so this must
+                           # happen explicitly before every rerun, or the write
+                           # this button just made is silently lost.
+            st.rerun()
 
 
 # --------------------------------------------------------------- story bank
@@ -560,8 +607,9 @@ def _stories_with_competencies(conn):
     return out
 
 
-def _story_bank(conn, master_resume, claim_row):
-    st.markdown('<div class="ib-label">Story bank</div>', unsafe_allow_html=True)
+def _story_bank(conn, master_resume, claims):
+    st.caption("Every behavioral/competency question ultimately wants a real story. Map what you "
+              "have, and draft new ones from a resume claim when a competency has nothing yet.")
 
     gaps = interview_stories.coverage_gaps(conn)
     if gaps:
@@ -587,8 +635,18 @@ def _story_bank(conn, master_resume, claim_row):
                                    # this button just made is silently lost.
                     st.rerun()
     else:
-        st.caption("No stories mapped to this competency yet — add one from a claim below.")
+        st.caption("No stories yet — draft one from a claim below.")
 
+    st.markdown('<div class="ib-label">Draft a new story from a resume claim</div>',
+               unsafe_allow_html=True)
+    if not claims:
+        st.caption("No resume claims available yet.")
+        return
+    default_idx = min(st.session_state.get("ib_claim_select", 0), len(claims) - 1)
+    claim_idx = st.selectbox("Base it on this claim", options=range(len(claims)),
+                             format_func=lambda i: claims[i]["claim_text"][:90],
+                             key="ib_story_claim_select", index=default_idx)
+    claim_row = claims[claim_idx]
     if st.button("Draft a story from this claim (SITAR, live)", key="ib_draft_story"):
         with st.spinner("Drafting a first-pass story…"):
             claim = dict(id=claim_row["id"], claim_text=claim_row["claim_text"],
@@ -615,11 +673,14 @@ def _story_bank(conn, master_resume, claim_row):
 
 def _all_questions_for_bank(conn, process_id):
     """Flattens claim_question + metric_defense (global, shared across every
-    process per T§14) and this process's base_question_bank selection into
-    one list -- a consolidation of data that already exists, not a new
-    question source. Each row carries a 0-1 priority so risk-derived claim
-    questions and importance-derived base questions sort on the same axis."""
-    import interview_question_bank as qb
+    process per T§14) and the FULL base question bank (not just the
+    per-process top-10 ranked slice) into one list -- a consolidation of
+    data that already exists, not a new question source. Each row carries a
+    0-1 priority so risk-derived claim questions and importance-derived base
+    questions sort on the same axis."""
+    recommended_ids = {r["source_ref_id"] for r in conn.execute(
+        "SELECT source_ref_id FROM prep_topic WHERE process_id=? AND source='base_question_bank'",
+        (process_id,)).fetchall()}
     rows = []
     for c in conn.execute("SELECT id, claim_text, category, risk_level FROM resume_claim").fetchall():
         for q in conn.execute(
@@ -640,39 +701,116 @@ def _all_questions_for_bank(conn, process_id):
                 "Status": v["draft_status"] if v else "not generated",
                 "Reviewed": v["review_depth"] if v else "—",
             })
-    for t in conn.execute(
-            "SELECT source_ref_id, priority FROM prep_topic WHERE process_id=? "
-            "AND source='base_question_bank'", (process_id,)).fetchall():
-        q = _base_question_by_id(t["source_ref_id"])
-        if not q:
-            continue
+    for q in qb.BASE_QUESTIONS:
         v = _current_version_row(conn, process_id, "base_question", q["id"])
         rows.append({
-            "Question": q["text"], "Category": qb.CATEGORY_LABELS.get(q["category"], q["category"]),
-            "Priority": t["priority"],
+            "Question": q["text"] + (" ⭐" if q["id"] in recommended_ids else ""),
+            "Category": qb.CATEGORY_LABELS.get(q["category"], q["category"]),
+            "Priority": 1.0 if q["id"] in recommended_ids else round(
+                qb.CATEGORY_BASE_IMPORTANCE.get(q["category"], 0.5) * 0.9, 2),
             "Status": v["draft_status"] if v else "not generated",
             "Reviewed": v["review_depth"] if v else "—",
         })
     return rows
 
 
-def _question_bank_view(conn, process_id):
+def _question_bank_table(conn, process_id):
     rows = _all_questions_for_bank(conn, process_id)
     if not rows:
         return
     import pandas as pd
-    st.markdown('<div class="ib-label">Question bank — everything in one place</div>',
-               unsafe_allow_html=True)
-    st.caption(f"{len(rows)} questions across claims, metrics defense, and the base bank. "
-              "Sorted by priority — click a column header to re-sort.")
+    st.caption(f"{len(rows)} questions across claims, metrics defense, and the full base bank. "
+              "⭐ marks questions ranked highest-priority for this JD. Read-only — use the tabs "
+              "below (or Resume Claims) to actually generate or edit an answer.")
     categories = sorted({r["Category"] for r in rows})
     chosen = st.multiselect("Filter by category", options=categories, default=[],
                             key="ib_qbank_filter")
+    search = st.text_input("Search question text", key="ib_qbank_search")
     filtered = [r for r in rows if not chosen or r["Category"] in chosen]
+    if search:
+        filtered = [r for r in filtered if search.lower() in r["Question"].lower()]
     df = pd.DataFrame(sorted(filtered, key=lambda r: -r["Priority"]))
     st.dataframe(df, hide_index=True, width="stretch")
-    st.caption("Read-only overview — use the claim picker or base questions section "
-              "above to actually generate or edit an answer.")
+
+
+def _question_bank_tab(conn, process_id, master_resume):
+    st.caption("Every question you might get asked, organized into buckets by tab. Every base "
+              "question is included in its bucket — ⭐ marks the ones ranked highest-priority "
+              "for this specific JD, but nothing is hidden or capped.")
+    with st.expander("🔎 Search across every question (flat table)"):
+        _question_bank_table(conn, process_id)
+
+    recommended_ids = {r["source_ref_id"] for r in conn.execute(
+        "SELECT source_ref_id FROM prep_topic WHERE process_id=? AND source='base_question_bank'",
+        (process_id,)).fetchall()}
+
+    cat_keys = list(qb.CATEGORY_LABELS.keys())
+    cat_tabs = st.tabs([qb.CATEGORY_LABELS[c] for c in cat_keys])
+    for cat_key, tab in zip(cat_keys, cat_tabs):
+        with tab:
+            qs = [q for q in qb.BASE_QUESTIONS if q["category"] == cat_key]
+            st.caption(f"{len(qs)} questions in this bucket.")
+            for q in qs:
+                _base_question_row(conn, process_id, q, master_resume,
+                                   starred=q["id"] in recommended_ids)
+
+
+# --------------------------------------------------------------- claims tab
+
+def _claims_tab(conn, process_id, claims, master_resume):
+    st.caption("Every resume bullet becomes a claim. Pick one below: you'll get Follow-up "
+              "Questions (how an interviewer probes it) and, if it carries a number, a Metrics "
+              "Defense set (interrogating that number specifically).")
+    if not claims:
+        st.info("No resume claims found — this shouldn't happen once the "
+                "candidate model has been built.")
+        return
+    claim_labels = [f"{c['claim_text'][:90]}" for c in claims]
+    claim_idx = st.selectbox("Choose a claim to prepare", options=range(len(claims)),
+                             format_func=lambda i: claim_labels[i], key="ib_claim_select")
+    claim_row = claims[claim_idx]
+    st.caption(f"Risk level {claim_row['risk_level']}/5 — higher means a metric with "
+              "unclear ownership, exactly the combination a follow-up exposes.")
+
+    has_any = any(_current_version_row(conn, process_id, "claim_question", q["id"])
+                 for q in _claim_questions(conn, claim_row["id"])) or \
+              any(_current_version_row(conn, process_id, "metric_defense", q["id"])
+                 for q in _metric_defense_questions(conn, claim_row["id"]))
+    if not has_any:
+        st.info("Generate first-pass answers using your confirmed facts and stories. "
+                "Anything only you know will be left blank for you to fill.")
+        if st.button("Generate answers for this claim", type="primary", key="ib_generate_claim"):
+            _generate_for_claim(conn, process_id, claim_row, master_resume)
+            conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
+                           # manager only commits on normal exit, so this must
+                           # happen explicitly before every rerun, or the write
+                           # this button just made is silently lost.
+            st.rerun()
+    else:
+        if st.button("Regenerate any missing", key="ib_generate_claim_more"):
+            _generate_for_claim(conn, process_id, claim_row, master_resume)
+            conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
+                           # manager only commits on normal exit, so this must
+                           # happen explicitly before every rerun, or the write
+                           # this button just made is silently lost.
+            st.rerun()
+        _read_through_queue(conn, process_id, claim_row)
+
+
+# ------------------------------------------------------------- overview tab
+
+def _overview_tab(conn, process_id):
+    fit = _fit_rollup(conn, process_id)
+    if fit is not None:
+        st.markdown(f'<div class="ib-label">Your fit against this JD</div>'
+                   f'<div style="font-size:1.4rem;color:var(--brass)">{fit}%</div>'
+                   f'<div style="opacity:0.7;font-size:0.85em">Weighted by requirement tier '
+                   f'(must-have counts more) — a rollup of the matched/partial/gap calls, '
+                   f'not a new judgment.</div>', unsafe_allow_html=True)
+    st.markdown("")
+    _progress_bar(conn, process_id)
+    st.markdown("")
+    _focus_list(conn, process_id)
 
 
 # ---------------------------------------------------------------------- main
@@ -692,67 +830,23 @@ def render():
         if not process_id:
             return
 
-        st.divider()
-        fit = _fit_rollup(conn, process_id)
-        if fit is not None:
-            st.markdown(f'<div class="ib-label">Your fit against this JD</div>'
-                       f'<div style="font-size:1.4rem;color:var(--brass)">{fit}%</div>'
-                       f'<div style="opacity:0.7;font-size:0.85em">Weighted by requirement tier '
-                       f'(must-have counts more) — a rollup of the matched/partial/gap calls below, '
-                       f'not a new judgment.</div>', unsafe_allow_html=True)
-        _render_prep_topics(conn, process_id)
-        st.divider()
-        with st.expander("📚 Question bank (all questions, filterable)"):
-            _question_bank_view(conn, process_id)
-        st.divider()
-
-        st.markdown('<div class="ib-label">🎯 Prepare — claims, questions, metrics, stories</div>',
-                    unsafe_allow_html=True)
-        st.caption("Every resume bullet becomes a claim: a question tree (T§4.4) to defend it, "
-                  "a metrics-defense set (T§4.5) if it carries a number, and a story you can map "
-                  "to it (T§4.7). Sorted by risk by default, but this covers every claim, not just "
-                  "the risky ones.")
         claims = _claim_options(conn)
-        if not claims:
-            st.info("No resume claims found — this shouldn't happen once the "
-                    "candidate model has been built.")
-            return
-        claim_labels = [f"{c['claim_text'][:90]}" for c in claims]
-        claim_idx = st.selectbox("Choose a claim to prepare", options=range(len(claims)),
-                                 format_func=lambda i: claim_labels[i], key="ib_claim_select")
-        claim_row = claims[claim_idx]
-        st.caption(f"Risk level {claim_row['risk_level']}/5 — higher means a metric with "
-                  "unclear ownership, exactly the combination a follow-up exposes.")
+        fact_count = conn.execute(
+            "SELECT COUNT(*) AS n FROM fact_candidate WHERE process_id=? AND status IN ('pending','conflicted')",
+            (process_id,)).fetchone()["n"]
+        fact_tab_label = f"✅ Fact Review ({fact_count})" if fact_count else "✅ Fact Review"
 
-        has_any = any(_current_version_row(conn, process_id, "claim_question", q["id"])
-                     for q in _claim_questions(conn, claim_row["id"])) or \
-                  any(_current_version_row(conn, process_id, "metric_defense", q["id"])
-                     for q in _metric_defense_questions(conn, claim_row["id"]))
-        if not has_any:
-            st.info("Generate first-pass answers using your confirmed facts and stories. "
-                    "Anything only you know will be left blank for you to fill.")
-            if st.button("Generate answers for this claim", type="primary", key="ib_generate_claim"):
-                _generate_for_claim(conn, process_id, claim_row, master_resume)
-                conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                               # manager only commits on normal exit, so this must
-                               # happen explicitly before every rerun, or the write
-                               # this button just made is silently lost.
-                st.rerun()
-        else:
-            if st.button("Regenerate any missing", key="ib_generate_claim_more"):
-                _generate_for_claim(conn, process_id, claim_row, master_resume)
-                conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                               # manager only commits on normal exit, so this must
-                               # happen explicitly before every rerun, or the write
-                               # this button just made is silently lost.
-                st.rerun()
-            _read_through_queue(conn, process_id, claim_row)
+        tab_overview, tab_claims, tab_bank, tab_stories, tab_facts = st.tabs([
+            "🎯 Overview", "📋 Resume Claims", "🗂️ Question Bank", "📖 Story Bank", fact_tab_label,
+        ])
 
-        st.divider()
-        _base_questions_section(conn, process_id, master_resume)
-
-        st.divider()
-        _story_bank(conn, master_resume, claim_row)
-
-        st.divider()
-        _fact_review_queue(conn, process_id)
+        with tab_overview:
+            _overview_tab(conn, process_id)
+        with tab_claims:
+            _claims_tab(conn, process_id, claims, master_resume)
+        with tab_bank:
+            _question_bank_tab(conn, process_id, master_resume)
+        with tab_stories:
+            _story_bank(conn, master_resume, claims)
+        with tab_facts:
+            _fact_review_queue(conn, process_id)

@@ -36,6 +36,40 @@ contact is supplied (`user_existing_relationship`/`user_network_referral`/
 `inbound_recruiter`) or a real posting yields an apply-by-email address —
 check with Mehul on sequencing rather than assuming.
 
+**✅ Interview Prep UI reworked into 5 tabs (2026-08-11), fixing real
+clutter, not just cosmetics.** Mehul flagged the single-page Prepare screen
+as cluttered and specifically asked for tab-based navigation between
+question buckets, all base questions present in every bucket, and clearer
+"what to prioritize"/"question tree" sections. `interview_ui.py` restructured
+around `st.tabs`: 🎯 Overview / 📋 Resume Claims / 🗂️ Question Bank / 📖 Story
+Bank / ✅ Fact Review (badge-counted), instead of one long page stacked with
+dividers. Two real gaps found and fixed beyond the literal ask:
+1. **The base question bank (83 questions, 10 categories) was capped at 10
+   total anywhere in the UI** — `BASE_QUESTIONS_PER_PROCESS` ranks the top 10
+   into `prep_topic` for prioritization, but the old `_base_questions_section`
+   only ever rendered that ranked slice, so 73 of 83 questions were
+   unreachable in the UI regardless of category. Question Bank tab now has
+   one sub-tab per category showing every question in it (verified live:
+   10/10 in "Introduction & Career", 10/10 in "Behavioral"); the ranked-10
+   are starred (⭐) rather than being the only ones shown. This was the
+   literal ask ("all base questions... in each bucket").
+2. **New: an honest "Preparation coverage" bar** (generated/total questions
+   drafted, reviewed-count) — deliberately a plain count, not a fabricated
+   readiness score, same discipline as the fit rollup and the declined
+   "Interview Readiness: 74%" earlier this session.
+"What to prioritize" renamed **Focus List** and regrouped by *why* (JD
+requirement gaps / high-risk claims / uncovered story competencies /
+recommended standard questions) instead of one flat list mixing all four
+source types with cryptic tags. "Question tree" renamed **Follow-up
+questions** for clarity — same underlying 10 templated question types,
+just clearer labeling. Story Bank and Fact Review got their own
+tab-independent state (a claim selector inside Story Bank, defaulting to
+whatever was last picked in Resume Claims) so switching tabs doesn't lose
+context. Live-verified against the real ICICI Bank process (43% fit,
+16/313 coverage, all 5 tabs render real data, no console errors); both
+smoke suites (`interview_smoke_test.py`, `answer_bank_smoke_test.py`)
+still pass — no backend changes, UI-only.
+
 ## STATUS (last updated 2026-08-11)
 
 **🟢 Interview Prep & Practice toolkit — Phase 1 (preparation) built,
