@@ -320,7 +320,7 @@ def _prep_plan(conn, process_id, days_to_interview, master_resume):
         chip = _PREP_STATE_CHIP.get(item["prepared"], "")
         context = item.get("context") or ""
         ctx_html = (f'<div style="opacity:0.6;font-size:0.8em;margin-top:0.35em">'
-                    f'{html.escape(context[:120])}{"…" if len(context) > 120 else ""}</div>'
+                    f'{html.escape(_trunc(context, 120))}</div>'
                     if context else "")
         with st.expander(f"{i}. {item['question_text']}"):
             st.markdown(
@@ -649,12 +649,31 @@ def _base_question_row(conn, process_id, q, master_resume, starred=False):
 
 # --------------------------------------------------------------- story bank
 
+# The five SITAR fields you'd actually speak; the eight "detail" fields
+# (team_size, exact_role, ...) exist to be filled in, not read as prose.
+_SITAR_FIELDS = ("situation", "task", "action", "result", "reflection")
+_SITAR_LABELS = {"situation": "Situation", "task": "Task", "action": "Action",
+                 "result": "Result", "reflection": "Reflection"}
+
+
+def _trunc(text: str, max_len: int) -> str:
+    """Truncate at a word boundary with a real ellipsis -- never a hard
+    mid-word cut. A bare text[:N] slice (the previous behavior, e.g.
+    "...Personal Loan product, gro") reads as a broken resume line even
+    though the underlying data is complete; this only affects display."""
+    text = text or ""
+    if len(text) <= max_len:
+        return text
+    cut = text[:max_len].rsplit(" ", 1)[0]
+    return (cut or text[:max_len]) + "…"
+
+
 def _competency_names(conn):
     return [r["name"] for r in conn.execute("SELECT name FROM competency ORDER BY name").fetchall()]
 
 
 def _stories_with_competencies(conn):
-    rows = conn.execute("SELECT id, title, situation, action, result FROM story ORDER BY id DESC").fetchall()
+    rows = conn.execute("SELECT * FROM story ORDER BY id DESC").fetchall()
     out = []
     for r in rows:
         comps = [c["name"] for c in conn.execute(
@@ -664,33 +683,92 @@ def _stories_with_competencies(conn):
     return out
 
 
-def _story_bank(conn, master_resume, claims):
-    st.caption("Every behavioral/competency question ultimately wants a real story. Map what you "
-              "have, and draft new ones from a resume claim when a competency has nothing yet.")
+def _coverage_chips(conn):
+    """Every competency at a glance, covered vs. gap -- replaces a plain
+    caption sentence ("No story mapped yet for: leadership, ownership,
+    conflict...") with the same chip language the rest of the app uses,
+    so this reads as status, not as a debug string."""
+    names = _competency_names(conn)
+    gaps = set(interview_stories.coverage_gaps(conn))
+    chips = "".join(
+        f'<span class="ib-chip {"ib-chip-gap" if n in gaps else "ib-chip-complete"}">'
+        f'{n.replace("_", " ")}</span>' for n in names)
+    st.markdown(f'<div style="margin-bottom:0.6rem">{chips}</div>', unsafe_allow_html=True)
 
-    gaps = interview_stories.coverage_gaps(conn)
-    if gaps:
-        st.caption("No story mapped yet for: " + ", ".join(g.replace("_", " ") for g in gaps))
+
+def _story_detail_fields(conn, story_row):
+    """The eight supporting fields (team_size, exact_role, decision_made,
+    stakeholders, metrics, tradeoff, failure, learning) every drafted story
+    defaults to a literal "[YOU FILL: ...]" placeholder for -- I4's whole
+    point is that you notice and fill these, which was impossible while
+    nothing in the UI ever showed them. Nested under its own expander so the
+    main story card stays readable; only flagged in the header when
+    something is still unfilled."""
+    unfilled = [f for f in interview_stories.PLACEHOLDER_FIELDS
+               if (story_row[f] or "").startswith("[YOU FILL:")]
+    label = f"Fill in the details ({len(unfilled)} left)" if unfilled else "Details — all filled in"
+    with st.expander(label):
+        edits = {}
+        cols = st.columns(2)
+        for i, f in enumerate(interview_stories.PLACEHOLDER_FIELDS):
+            edits[f] = cols[i % 2].text_input(
+                f.replace("_", " ").title(), value=story_row[f] or "",
+                key=f"ib_story_detail_{f}_{story_row['id']}")
+        if st.button("Save details", key=f"ib_story_detail_save_{story_row['id']}"):
+            interview_stories.update_story(conn, story_row["id"], None, **edits)
+            conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
+            st.rerun()
+
+
+def _story_card(conn, master_resume, story_row, comps):
+    comp_chips = "".join(f'<span class="ib-chip ib-chip-neutral">{c}</span>' for c in comps) \
+        or '<span class="ib-chip ib-chip-gap">not mapped to a competency</span>'
+    preview = _trunc(story_row["situation"] or story_row["result"] or "", 90)
+    with st.expander(f"{story_row['title']} — {preview}"):
+        st.markdown(f'<div style="margin-bottom:0.5rem">{comp_chips}</div>', unsafe_allow_html=True)
+
+        edits = {}
+        for f in _SITAR_FIELDS:
+            preview_html = _render_fillin_blanks(story_row[f] or "")
+            st.markdown(f'<div class="ib-label">{_SITAR_LABELS[f]}</div>'
+                       f'<div class="ib-card" style="padding:0.5rem 0.9rem;margin-bottom:0.4rem">'
+                       f'{preview_html or "<i>empty</i>"}</div>', unsafe_allow_html=True)
+            edits[f] = st.text_area(_SITAR_LABELS[f], value=story_row[f] or "", height=70,
+                                    label_visibility="collapsed",
+                                    key=f"ib_story_edit_{f}_{story_row['id']}")
+
+        c1, c2, c3 = st.columns([1, 1, 1])
+        if c1.button("Save", key=f"ib_story_save_{story_row['id']}"):
+            interview_stories.update_story(conn, story_row["id"], master_resume, **edits)
+            conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
+            st.rerun()
+        if not comps:
+            comp_choice = c2.selectbox("Map to", options=_competency_names(conn),
+                                       key=f"ib_story_comp_{story_row['id']}",
+                                       label_visibility="collapsed")
+            if c3.button("Map", key=f"ib_map_story_{story_row['id']}"):
+                interview_stories.map_story_to_competency(conn, story_row["id"], comp_choice)
+                conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
+                st.rerun()
+        if st.button("Delete this story", key=f"ib_story_delete_{story_row['id']}"):
+            interview_stories.delete_story(conn, story_row["id"])
+            conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
+            st.rerun()
+
+        _story_detail_fields(conn, story_row)
+
+
+def _story_bank(conn, master_resume, claims):
+    st.caption("Every behavioral question wants a real story behind it. Map what you have, fill "
+              "in the blanks a first draft can't know, and draft a new one where a competency has "
+              "nothing yet.")
+
+    _coverage_chips(conn)
 
     stories = _stories_with_competencies(conn)
     if stories:
         for row, comps in stories:
-            comp_chips = "".join(f'<span class="ib-chip ib-chip-neutral">{c}</span>' for c in comps) \
-                or '<span class="ib-chip ib-chip-gap">unmapped</span>'
-            st.markdown(
-                f'<div class="ib-card" style="padding:0.6rem 1rem;"><b>{html.escape(row["title"])}</b><br>'
-                f'{_render_fillin_blanks(row["result"] or "")}<div style="margin-top:0.4em">{comp_chips}</div></div>',
-                unsafe_allow_html=True)
-            if not comps:
-                comp_choice = st.selectbox("Map to competency", options=_competency_names(conn),
-                                           key=f"ib_story_comp_{row['id']}")
-                if st.button("Map", key=f"ib_map_story_{row['id']}"):
-                    interview_stories.map_story_to_competency(conn, row["id"], comp_choice)
-                    conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                                   # manager only commits on normal exit, so this must
-                                   # happen explicitly before every rerun, or the write
-                                   # this button just made is silently lost.
-                    st.rerun()
+            _story_card(conn, master_resume, row, comps)
     else:
         st.caption("No stories yet — draft one from a claim below.")
 
@@ -701,7 +779,7 @@ def _story_bank(conn, master_resume, claims):
         return
     default_idx = min(st.session_state.get("ib_claim_select", 0), len(claims) - 1)
     claim_idx = st.selectbox("Base it on this claim", options=range(len(claims)),
-                             format_func=lambda i: claims[i]["claim_text"][:90],
+                             format_func=lambda i: _trunc(claims[i]["claim_text"], 90),
                              key="ib_story_claim_select", index=default_idx)
     claim_row = claims[claim_idx]
     if st.button("Draft a story from this claim (SITAR, live)", key="ib_draft_story"):
@@ -711,16 +789,14 @@ def _story_bank(conn, master_resume, claims):
                         source_role=claim_row["source_role"])
             try:
                 result = interview_stories.draft_story_from_claim(
-                    conn, claim, master_resume, claim_row["claim_text"][:60])
+                    conn, claim, master_resume, _trunc(claim_row["claim_text"], 60))
             except Exception as e:
                 st.error(f"Draft failed: {e}")
             else:
                 if result["ok"]:
-                    st.success("Story drafted — see it in the list above, and map it to a competency.")
-                    conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                                   # manager only commits on normal exit, so this must
-                                   # happen explicitly before every rerun, or the write
-                                   # this button just made is silently lost.
+                    st.success("Story drafted — see it in the list above. Open it to read the "
+                              "full story, fill in any blanks, and map it to a competency.")
+                    conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
                     st.rerun()
                 else:
                     st.error(f"Rejected: {result['violations']}")
@@ -822,7 +898,7 @@ def _claims_tab(conn, process_id, claims, master_resume):
         st.info("No resume claims found — this shouldn't happen once the "
                 "candidate model has been built.")
         return
-    claim_labels = [f"{c['claim_text'][:90]}" for c in claims]
+    claim_labels = [_trunc(c["claim_text"], 90) for c in claims]
     claim_idx = st.selectbox("Choose a claim to prepare", options=range(len(claims)),
                              format_func=lambda i: claim_labels[i], key="ib_claim_select")
     claim_row = claims[claim_idx]

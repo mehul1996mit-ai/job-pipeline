@@ -482,6 +482,49 @@ check("an LLM requirement not grounded in the JD text is rejected",
 check("a genuinely grounded requirement is kept",
       interview_llm._grounded_in_jd("mobile banking", "experience in mobile banking apps"))
 
+print("\n== Story bank editing (update_story / delete_story)")
+with interview_store.connect() as _c:
+    _story_res = interview_stories.create_story(
+        _c, "Test story", MASTER_RESUME,
+        situation="I was on the lending team.", task="I needed to fix drop-off.",
+        action="I redesigned the flow.", result="Drop-off fell 40%.",
+        reflection="Shows I can own a funnel end to end.")
+    _sid = _story_res["story_id"]
+
+    _before = _c.execute("SELECT * FROM story WHERE id=?", (_sid,)).fetchone()
+    check("a freshly drafted/created story has placeholder detail fields "
+          "(the fields the UI previously never surfaced)",
+          all((_before[f] or "").startswith("[YOU FILL:")
+              for f in interview_stories.PLACEHOLDER_FIELDS))
+
+    interview_stories.update_story(_c, _sid, MASTER_RESUME, team_size="4 engineers",
+                                   situation="I was on the digital lending team at Bajaj Finance.")
+    _after = _c.execute("SELECT * FROM story WHERE id=?", (_sid,)).fetchone()
+    check("update_story persists an edited SITAR field",
+          _after["situation"] == "I was on the digital lending team at Bajaj Finance.")
+    check("update_story persists an edited detail field",
+          _after["team_size"] == "4 engineers")
+    check("update_story leaves untouched fields alone",
+          _after["result"] == "Drop-off fell 40%.")
+
+    interview_stories.delete_story(_c, _sid)
+    check("delete_story actually removes the row",
+          _c.execute("SELECT 1 FROM story WHERE id=?", (_sid,)).fetchone() is None)
+
+print("\n== Display truncation never produces a mid-word cut (found live: "
+      "\"...Personal Loan product, gro\" read as a broken resume, not a UI slice)")
+import interview_ui as _iu
+_long = "Led development and management of digital platforms for the Personal Loan product, growing user engagement 27%."
+_t = _iu._trunc(_long, 60)
+_cut = _t[:-1] if _t.endswith("…") else _t
+check("a truncated string ends on a real word, not mid-word",
+      _long.startswith(_cut) and (len(_cut) == len(_long) or _long[len(_cut)] == " "),
+      f"({_t!r})")
+check("a truncated string carries the ellipsis marker",
+      _t.endswith("…"), f"({_t!r})")
+check("a string shorter than the limit is returned untouched",
+      _iu._trunc("short", 60) == "short")
+
 print(f"\n{'='*60}")
 if failures:
     print(f"{failures} check(s) FAILED")

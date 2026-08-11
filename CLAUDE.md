@@ -203,6 +203,62 @@ because I rendered it badly (truncated mid-word, phrased as a topic, no
 action, visually identical to the `'seamless'` junk above it), not because
 the content was wrong. It now sits at the top of the plan as real questions.
 
+**✅ Story Bank rebuilt, and "incomplete claim lines" turned out to be a
+display bug, not corrupted resume data (2026-08-12).** Mehul reported two
+things; both were real, neither was what the label suggested.
+
+1. **"Claims contain incomplete lines"** — checked `resume_master.json`
+   directly first: every bullet is complete, verbatim, no truncation at the
+   source. The actual bug was hard `text[:90]`/`[:100]`/`[:60]` slices with
+   NO ellipsis at four call sites (claim selectbox in Resume Claims, claim
+   selectbox in Story Bank, the prep-plan context line, the story-draft
+   title) — e.g. "...Personal Loan product, gro" reads exactly like a
+   corrupted resume even though the underlying claim text was always whole.
+   Fixed with one shared `interview_ui._trunc()`: cuts at the last word
+   boundary and appends a real ellipsis, used everywhere claim text is
+   shown short. 3 new smoke guards assert no mid-word cut is possible.
+2. **Story Bank "needs to be simpler" — audited, and it was actually
+   incomplete, not merely cluttered.** Before this pass, a drafted story
+   showed only its `title` + `result` field with no way to read or edit
+   `situation`/`task`/`action`/`reflection` at all, and **no `update_story()`
+   function existed anywhere in the codebase** — a "first-pass draft for the
+   candidate to edit" (§4.7's own framing) could be created and then never
+   touched again. Worse: every story ALSO has 8 supporting fields
+   (`team_size`, `exact_role`, `decision_made`, `stakeholders`, `metrics`,
+   `tradeoff`, `failure`, `learning`) that `create_story()` defaults to a
+   literal `"[YOU FILL: ...]"` placeholder — I4's entire mechanism assumes a
+   human notices and fills these, and nothing in the UI ever showed them.
+   Fixed:
+   - New `interview_stories.update_story()` / `delete_story()`. Edits are
+     trusted at the same level as a hand-typed prepared-answer edit (E6's
+     authored-content trust tier) — NOT run back through I3's
+     regenerate-then-hard-fail path, since that path exists to catch a
+     MODEL inventing a fact, not to second-guess the candidate typing their
+     own number.
+   - `interview_ui._story_card()`: every story is now an expander showing
+     all five SITAR fields, each independently editable and saved via
+     `update_story()`, plus a nested "Fill in the details (N left)"
+     expander surfacing the 8 previously-invisible fields, plus a Delete
+     button.
+   - Coverage gaps went from a plain caption sentence
+     ("No story mapped yet for: leadership, ownership, conflict...") to
+     styled chips covering every competency, gap vs. covered, matching the
+     chip language used everywhere else in the app.
+   Live-verified against the real ICICI Bank process: opened an existing
+   drafted story, confirmed all 5 SITAR fields render, confirmed the
+   8-field "Fill in the details" expander opens correctly. 5 new smoke
+   guards (create → edit → verify persisted → delete → verify gone).
+   **Noted but not touched**: one pre-existing story in the live DB (drafted
+   in an earlier session) has an angle-bracket placeholder
+   (`<describe specific technical steps...>`) instead of the
+   `[YOU FILL: ...]` format — predates this session's placeholder-format
+   work, `_render_fillin_blanks()` won't style it specially, but it's now at
+   least visible and editable where it wasn't before.
+
+All four smoke suites (`interview_smoke_test.py` — 13 new checks total this
+pass, `answer_bank_smoke_test.py`, `smoke_test.py`,
+`career_agent_smoke_test.py`) pass.
+
 ## STATUS (last updated 2026-08-11)
 
 **🟢 Interview Prep & Practice toolkit — Phase 1 (preparation) built,

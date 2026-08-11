@@ -112,6 +112,41 @@ def create_story(conn, title: str, master_resume: dict, claim_id: int | None = N
     return {"ok": True, "violations": [], "story_id": cur.lastrowid}
 
 
+def update_story(conn, story_id: int, master_resume: dict, **fields) -> dict:
+    """Edit an existing story's own fields directly -- this is the candidate
+    hand-editing their own words, not a regeneration, so it is trusted the
+    same way a hand-typed prepared-answer edit is (E6's authored-content
+    trust level), not run back through I3's regenerate-then-hard-fail path.
+    That path exists to stop a MODEL from asserting a number it invented;
+    it was never meant to stop a candidate from typing their own number.
+
+    Until this existed, a drafted story could never be revised or have its
+    [YOU FILL: ...] placeholders filled in -- the only two things §4.7's own
+    "first-pass...for the candidate to edit" framing implies you'd do next.
+
+    `fields` may include any of: situation, task, action, result,
+    reflection, plus the PLACEHOLDER_FIELDS. Only keys present are updated."""
+    row = conn.execute("SELECT * FROM story WHERE id = ?", (story_id,)).fetchone()
+    if not row:
+        raise ValueError(f"no story with id {story_id}")
+
+    allowed = {"situation", "task", "action", "result", "reflection", *PLACEHOLDER_FIELDS}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return {"ok": True, "violations": []}
+
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    conn.execute(
+        f"UPDATE story SET {set_clause}, updated_at = ? WHERE id = ?",
+        (*updates.values(), _now(), story_id))
+    return {"ok": True, "violations": []}
+
+
+def delete_story(conn, story_id: int) -> None:
+    conn.execute("DELETE FROM story_competency WHERE story_id = ?", (story_id,))
+    conn.execute("DELETE FROM story WHERE id = ?", (story_id,))
+
+
 def map_story_to_competency(conn, story_id: int, competency_name: str) -> None:
     row = conn.execute(
         "SELECT id FROM competency WHERE name = ?", (competency_name,)).fetchone()
