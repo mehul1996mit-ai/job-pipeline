@@ -437,6 +437,278 @@ def generate_prep_topics(conn, process_id: int) -> list[int]:
     return ids
 
 
+def reanalyze_process_jd(conn, process_id: int, master_resume: dict,
+                          config: dict | None = None, call_fn=None) -> dict:
+    """Re-extract this process's JD requirements using the LLM analyst, then
+    re-run the CV match and regenerate prep topics.
+
+    ingest_jd() runs the deterministic extractor only, because §4.2 requires
+    steps 1-2 to complete synchronously with no external call. That's the
+    right call at intake -- but it leaves the process holding job_pipeline's
+    BULK-scoring output, which is lexical n-grams, not requirements (found
+    live: 'gathering', 'solution', 'seamless', and one literally named
+    'key' were all stored as must-haves, while the genuinely
+    interview-relevant gaps sat a tier below them). This is the deferred
+    upgrade pass, same async-after-intake shape as
+    enrich_topics_with_rationale().
+
+    Falls back to leaving existing requirements untouched if the LLM read
+    fails or returns nothing usable -- a degraded read is never allowed to
+    wipe out requirement extraction entirely."""
+    from interview_llm import analyze_jd_llm
+
+    proc = conn.execute(
+        "SELECT jd_text, role_title, company_name FROM interview_process WHERE id = ?",
+        (process_id,)).fetchone()
+    if not proc:
+        raise ValueError(f"no interview_process with id {process_id}")
+
+    llm = analyze_jd_llm(proc["jd_text"], proc["role_title"], proc["company_name"],
+                         config=config, call_fn=call_fn)
+    if not llm:
+        return {"ok": False, "reason": "llm_analysis_unavailable", "requirement_ids": []}
+
+    # Deliberately NOT merge_llm_analysis() for the three skill tiers.
+    # That helper preserves a deterministic finding whenever the LLM returns
+    # an empty list, which is right for bulk scoring (a dropped requirement
+    # hides a real gap inside a score) and wrong here. Found live: the model
+    # correctly returned must_have_skills=[] for a JD that states no hard
+    # requirements, and the merge dutifully restored the lexical must-haves
+    # 'gathering', 'solution' and 'drive end-to-end' -- exactly the noise this
+    # pass exists to remove. Read literally by a human, a junk requirement is
+    # worse than no requirement. The deterministic parse IS kept for
+    # min_years/education/eligibility, which are reliable regex reads.
+    base = jd_analyst.analyze_jd(proc["jd_text"])
+    merged = dict(base)
+    for tier_key in ("must_have_skills", "preferred_skills", "key_skills"):
+        merged[tier_key] = llm.get(tier_key, [])
+    merged["analyst"] = "llm"
+
+    # Replace, don't append -- leaving the old lexical rows in place would
+    # keep polluting the fit rollup this pass exists to make trustworthy.
+    # requirement_match first (it FKs jd_requirement), then the stale
+    # requirement_gap topics that point at the rows about to disappear.
+    conn.execute("DELETE FROM requirement_match WHERE process_id = ?", (process_id,))
+    conn.execute("DELETE FROM jd_requirement WHERE process_id = ?", (process_id,))
+    conn.execute("DELETE FROM prep_topic WHERE process_id = ?", (process_id,))
+
+    cv_idx, cv_lower = _cv_text_index(master_resume)
+    requirement_ids = []
+    for tier_key, tier in (("must_have_skills", "must_have"),
+                           ("preferred_skills", "preferred"),
+                           ("key_skills", "key")):
+        for req_text in merged.get(tier_key, []):
+            cur = conn.execute(
+                """INSERT INTO jd_requirement
+                   (process_id, requirement_text, tier, analyst, created_at)
+                   VALUES (?,?,?,?,?)""",
+                (process_id, req_text, tier, merged.get("analyst", "llm"), _now()))
+            req_id = cur.lastrowid
+            requirement_ids.append(req_id)
+            match = skill_match.match_skill(req_text, cv_idx, cv_lower)
+            layer = match.get("layer", "none")
+            status = ("matched" if layer in ("exact", "phrase")
+                      else "partial" if layer in ("alias", "stem") else "gap")
+            conn.execute(
+                """INSERT INTO requirement_match
+                   (process_id, requirement_id, match_status, layer, evidence_ref, created_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (process_id, req_id, status, layer,
+                 "resume_master.json skills/experience text" if status != "gap" else None,
+                 _now()))
+
+    topic_ids = generate_prep_topics(conn, process_id)
+    return {"ok": True, "requirement_ids": requirement_ids, "topic_ids": topic_ids,
+            "analyst": merged.get("analyst", "llm")}
+
+
+# ------------------------------------------------------- prep plan (ranked)
+
+# An interviewer asks ~10 questions a round, ~40 across a loop. They do not
+# ask 313. So the plan CONVERGES on the few that matter rather than
+# enumerating everything that exists -- the flat 313-row bank stays available
+# in its own tab for lookup, but it is not what you prepare from.
+
+# Of the 10 templated claim questions, these are the ones an interviewer
+# actually reaches for on a claim whose ownership is ambiguous.
+_SHARP_CLAIM_TYPES = {"your_role": 0.95, "impact": 0.85, "data": 0.7, "how": 0.6}
+# Same idea for the 10 metric-defense dimensions.
+_SHARP_METRIC_DIMS = {"personal_contribution": 0.95, "measurement": 0.8,
+                      "causality": 0.75, "baseline": 0.7}
+
+# How many items the plan shows, by how close the interview is. Three weeks
+# out you can build stories; one day out you drill a short list. A single
+# static ordering ignores that difference entirely.
+# A templated question exists once per claim; without a cap the plan becomes
+# the same sentence repeated down the page.
+_MAX_REPEATS_PER_QUESTION = 2
+# Share of the plan reserved for standard questions, so the guaranteed
+# openers ("tell me about yourself", "why us") can never be scored out.
+_BASE_QUESTION_FLOOR = 0.4
+# At/above this likelihood a question is always worth rehearsing, so having
+# an answer already never discounts it out of the plan.
+_ALWAYS_REHEARSE = 0.9
+
+
+def plan_size_for(days_to_interview: int | None) -> int:
+    if days_to_interview is None:
+        return 25
+    if days_to_interview <= 1:
+        return 10
+    if days_to_interview <= 3:
+        return 15
+    if days_to_interview <= 7:
+        return 25
+    return 40
+
+
+def _preparedness(row) -> float:
+    """0 = no draft, 0.25 = a generated draft you haven't worked on, 1.0 = you
+    actually edited/rewrote it. The unreviewed tier is deliberately LOW: a
+    machine-written answer you've never read is barely preparation, and
+    scoring it as half-done let genuinely unprepared answers sink out of the
+    plan."""
+    if row is None:
+        return 0.0
+    return 1.0 if row["review_depth"] in ("edited", "rewritten") else 0.25
+
+
+def build_prep_plan(conn, process_id: int, days_to_interview: int | None = None,
+                     limit: int | None = None) -> list[dict]:
+    """One ranked, question-shaped list of what to prepare, newest state each
+    time it's called.
+
+    Every row is a QUESTION someone will actually say to you -- not a topic
+    like "Defend the ownership/impact of: ...", which is a description of
+    work, not a thing anyone asks. Ranked by likelihood x stakes, discounted
+    by how prepared you already are, so answered items sink without
+    disappearing."""
+    import interview_question_bank as qb
+
+    def _current(source, ref_id):
+        return conn.execute(
+            """SELECT review_depth, draft_status FROM prepared_answer_version
+               WHERE process_id=? AND question_source=? AND question_ref_id=?
+                 AND superseded_by IS NULL ORDER BY version_no DESC LIMIT 1""",
+            (process_id, source, ref_id)).fetchone()
+
+    proc = conn.execute(
+        "SELECT jd_text, role_title, company_name FROM interview_process WHERE id=?",
+        (process_id,)).fetchone()
+    items = []
+
+    # 1. Base questions -- the highest-probability things in any loop.
+    #    "Tell me about yourself" is near-certain; a niche execution question
+    #    is not, and the category prior already encodes that difference.
+    for q in qb.relevant_questions(proc["jd_text"] if proc else "",
+                                   proc["role_title"] if proc else ""):
+        likelihood = min(1.0, qb.question_likelihood(q) + (0.08 if q["tag_matched"] else 0))
+        if likelihood < 0.6:
+            continue
+        items.append({
+            "question_text": q["text"], "question_source": "base_question",
+            "question_ref_id": q["id"],
+            "context": qb.CATEGORY_LABELS.get(q["category"], q["category"]),
+            "why": "Standard question for this kind of role — near-certain to come up.",
+            "likelihood": likelihood, "stakes": 0.8,
+        })
+
+    # 2. The sharp questions on claims that carry a number with fuzzy
+    #    ownership. This is what an interviewer actually does: find the
+    #    biggest number, ask who really did it.
+    for c in conn.execute(
+            "SELECT id, claim_text, risk_level, metric_value FROM resume_claim "
+            "WHERE risk_level >= 4").fetchall():
+        risk = c["risk_level"] / 5
+        for cq in conn.execute(
+                "SELECT id, question_type, question_text FROM claim_question WHERE claim_id=?",
+                (c["id"],)).fetchall():
+            w = _SHARP_CLAIM_TYPES.get(cq["question_type"])
+            if not w:
+                continue
+            items.append({
+                "question_text": cq["question_text"], "question_source": "claim_question",
+                "question_ref_id": cq["id"], "context": c["claim_text"],
+                "why": "You claim a result here but the resume doesn't make ownership "
+                       "explicit — this is the follow-up that exposes that.",
+                "likelihood": w * risk, "stakes": 1.0,
+            })
+        if c["metric_value"]:
+            for md in conn.execute(
+                    "SELECT id, dimension, question_text FROM metric_defense WHERE claim_id=?",
+                    (c["id"],)).fetchall():
+                w = _SHARP_METRIC_DIMS.get(md["dimension"])
+                if not w:
+                    continue
+                items.append({
+                    "question_text": md["question_text"], "question_source": "metric_defense",
+                    "question_ref_id": md["id"], "context": c["claim_text"],
+                    "why": f"Defends the {c['metric_value']} figure itself — the number on "
+                           "your resume is the thing they'll pull on.",
+                    "likelihood": w * risk, "stakes": 1.0,
+                })
+
+    for it in items:
+        prepared = _preparedness(_current(it["question_source"], it["question_ref_id"]))
+        it["prepared"] = prepared
+        # Prepared items sink but never vanish -- EXCEPT the near-certain
+        # ones, which are never discounted at all. A plan that hides "tell me
+        # about yourself" because a draft exists has confused filling gaps
+        # with being ready: you are going to say that answer out loud in the
+        # first minute, so it stays on the rehearsal list no matter what.
+        discount = 0.0 if it["likelihood"] >= _ALWAYS_REHEARSE else 0.65 * prepared
+        it["score"] = round(it["likelihood"] * it["stakes"] * (1 - discount), 4)
+
+    items.sort(key=lambda i: -i["score"])
+    size = limit or plan_size_for(days_to_interview)
+
+    # The same templated question ("What specifically was your role versus the
+    # team's?") exists once per claim, so a pure score sort fills the whole
+    # list with one repeated sentence across different claims -- found live:
+    # 7 of the top 10 were two question texts. Cap repeats so the list reads
+    # as distinct work; the per-claim versions of a capped question are still
+    # reachable in Resume Claims.
+    seen_text, deduped = {}, []
+    for it in items:
+        key = it["question_text"].strip().lower()
+        if seen_text.get(key, 0) >= _MAX_REPEATS_PER_QUESTION:
+            continue
+        seen_text[key] = seen_text.get(key, 0) + 1
+        deduped.append(it)
+
+    # Guarantee the openers survive. A pure score sort put ZERO base questions
+    # in a 1-day plan (claim-defense outscored them) -- but no interview
+    # starts with "what part of this number is attributable to you", it starts
+    # with "tell me about yourself", and "why us" lands in essentially every
+    # loop. A plan that omits those is wrong regardless of what the maths says.
+    reserved = max(1, int(size * _BASE_QUESTION_FLOOR))
+    base_items = [i for i in deduped if i["question_source"] == "base_question"][:reserved]
+    rest = [i for i in deduped if i not in base_items][:size - len(base_items)]
+    out = base_items + rest
+    out.sort(key=lambda i: -i["score"])
+    return out[:size]
+
+
+def open_gaps(conn, process_id: int, limit: int = 6) -> list[dict]:
+    """Genuine must-have/preferred requirements this CV does not demonstrate.
+    Kept OUT of the question plan on purpose: a gap is not a question, it's
+    something to have a position on, and conflating the two is what made the
+    old flat focus list unreadable."""
+    # All tiers, ranked -- not filtered to must_have/preferred. A JD that
+    # never uses "required" language legitimately yields zero must-haves
+    # (confirmed live on a real posting), and filtering by tier would then
+    # show no gaps at all on a JD that plainly has them.
+    rows = conn.execute(
+        """SELECT jr.requirement_text, jr.tier, rm.match_status
+           FROM jd_requirement jr JOIN requirement_match rm ON rm.requirement_id = jr.id
+           WHERE jr.process_id = ? AND rm.match_status IN ('gap','partial')
+           ORDER BY (jr.tier='must_have') DESC, (jr.tier='preferred') DESC,
+                    (rm.match_status='gap') DESC""",
+        (process_id,)).fetchall()
+    return [{"requirement_text": r["requirement_text"], "tier": r["tier"],
+             "match_status": r["match_status"]} for r in rows[:limit]]
+
+
 def enrich_topics_with_rationale(conn, process_id: int, config: dict | None = None,
                                   call_fn=None) -> list[int]:
     """Lazily fills in prep_topic.rationale via the free-tier LLM (§4.6's

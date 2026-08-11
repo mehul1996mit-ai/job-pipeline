@@ -431,6 +431,57 @@ crit2 = interview_llm.critique_answer(
 check("a critique with no verbatim quote is flagged, not silently trusted",
       not crit2["quote_verified"])
 
+print("\n== Prep plan ranking (standing guards for bugs found live)")
+import interview_question_bank as _qb
+
+_plan_pid = interview_prep.process_new_jd(
+    "PlanCo", "Digital Product Manager",
+    "We need a product manager for digital lending. Requirement gathering, "
+    "stakeholder management, and mobile banking experience are important.",
+    "pasted", MASTER_RESUME)["process_id"]
+
+with interview_store.connect() as _c:
+    _plan = interview_prep.build_prep_plan(_c, _plan_pid, days_to_interview=1)
+    _plan14 = interview_prep.build_prep_plan(_c, _plan_pid, days_to_interview=14)
+
+check("a 1-day plan is short enough to actually drill",
+      len(_plan) == interview_prep.plan_size_for(1), f"({len(_plan)})")
+check("a plan further out is larger than a 1-day plan",
+      len(_plan14) > len(_plan), f"({len(_plan14)} vs {len(_plan)})")
+
+# Found live: a pure score sort filled 7 of the top 10 with two repeated
+# question texts (the same template exists once per claim).
+_texts = [i["question_text"].strip().lower() for i in _plan14]
+check("no single question text floods the plan",
+      all(_texts.count(t) <= interview_prep._MAX_REPEATS_PER_QUESTION for t in _texts))
+
+# Found live: a 1-day plan came back with ZERO standard questions -- no
+# "tell me about yourself", no "why us" -- because claim-defense outscored
+# them all. No interview opens with a metric-attribution probe.
+check("standard questions can never be scored out of the plan entirely",
+      any(i["question_source"] == "base_question" for i in _plan))
+
+# Found live: near-certain questions vanished once they had a draft, because
+# the preparedness discount treated an unread generated answer as progress.
+_certain = [i for i in _plan14 if i["likelihood"] >= interview_prep._ALWAYS_REHEARSE]
+check("near-certain questions appear in the plan at all", bool(_certain))
+check("a near-certain question is never discounted for already having a draft",
+      all(abs(i["score"] - i["likelihood"] * i["stakes"]) < 1e-6 for i in _certain))
+
+check("every plan row is a real question, not an internal topic string",
+      all(i["question_text"] and not i["question_text"].startswith("Prepare for:")
+          for i in _plan14))
+check("Tell me about yourself outranks a low-frequency intro question",
+      _qb.question_likelihood({"id": 1, "category": "intro_career"}) >
+      _qb.question_likelihood({"id": 10, "category": "intro_career"}))
+
+# I3-adjacent: a JD requirement the posting never stated would silently move
+# the fit score, exactly what tailor.py's own jd_analysis note warns about.
+check("an LLM requirement not grounded in the JD text is rejected",
+      not interview_llm._grounded_in_jd("kubernetes", "we need product managers"))
+check("a genuinely grounded requirement is kept",
+      interview_llm._grounded_in_jd("mobile banking", "experience in mobile banking apps"))
+
 print(f"\n{'='*60}")
 if failures:
     print(f"{failures} check(s) FAILED")

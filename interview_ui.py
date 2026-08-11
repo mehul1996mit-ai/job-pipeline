@@ -259,76 +259,111 @@ def _fit_rollup(conn, process_id):
 
 # ------------------------------------------------------------ progress bar
 
-def _progress_bar(conn, process_id):
-    """Honest generated/total coverage across every question this process
-    could have an answer for (claim questions + metric defense + the FULL
-    base bank, not just the top-10 ranked slice) -- a genuine count, never
-    a fabricated readiness/confidence score. Same discipline this repo
-    already applies to the fit rollup above."""
-    claim_total = conn.execute("SELECT COUNT(*) AS n FROM claim_question").fetchone()["n"]
-    metric_total = conn.execute("SELECT COUNT(*) AS n FROM metric_defense").fetchone()["n"]
-    base_total = len(qb.BASE_QUESTIONS)
-    total = claim_total + metric_total + base_total
-    if not total:
+def _progress_bar(conn, process_id, plan):
+    """Coverage against the questions that actually matter for THIS process,
+    not against every question that exists.
+
+    The first version of this measured against all 313 (every claim question
+    x every claim, plus all 83 base questions) and read "2%". Nobody drafts
+    313 answers -- an interviewer asks ~10 a round -- so that denominator was
+    unreachable by construction, which made a real effort look like no
+    progress. Measuring against the ranked plan is both honest and
+    achievable. Still a plain count, never a readiness score (E3/I7)."""
+    if not plan:
         return
-    rows = conn.execute(
-        """SELECT draft_status, review_depth FROM prepared_answer_version
-           WHERE process_id=? AND superseded_by IS NULL""", (process_id,)).fetchall()
-    generated = len(rows)
-    reviewed = sum(1 for r in rows if r["review_depth"] in ("edited", "rewritten"))
-    pct = round(100 * generated / total)
-    st.markdown('<div class="ib-label">Preparation coverage</div>', unsafe_allow_html=True)
+    total = len(plan)
+    drafted = sum(1 for i in plan if i["prepared"] > 0)
+    worked = sum(1 for i in plan if i["prepared"] >= 1.0)
+    pct = round(100 * drafted / total)
     st.markdown(
         f'<div class="ib-progress-track"><div class="ib-progress-fill" style="width:{pct}%"></div></div>'
-        f'<div style="font-size:0.85em;opacity:0.8">{generated} of {total} questions drafted '
-        f'({pct}%) · {reviewed} reviewed or rewritten by you. Not a readiness score — just a '
-        f'count of what exists vs. what you\'ve looked at.</div>',
+        f'<div style="font-size:0.82em;opacity:0.75">{drafted} of {total} priority questions '
+        f'have an answer · {worked} you\'ve actually worked on. Counts your shortlist, not '
+        f'all {len(qb.BASE_QUESTIONS)}+ questions in the bank — no one prepares those.</div>',
         unsafe_allow_html=True)
 
 
-# --------------------------------------------------------------- focus list
+# ----------------------------------------------------------------- prep plan
 
-_FOCUS_GROUPS = [
-    ("requirement_gap", "🎯 JD requirements to shore up",
-     "This JD asks for it and it isn't clearly on your resume yet. Prepare it in Resume Claims or Question Bank."),
-    ("high_risk_claim", "⚠️ Claims that need a strong defense",
-     "Carries a number but ownership isn't crystal clear — the exact combination a follow-up exposes. Go to Resume Claims."),
-    ("uncovered_competency", "📖 Competencies with no story yet",
-     "Nothing in your story bank demonstrates this. Go to Story Bank."),
-    ("base_question_bank", "💬 Recommended standard questions",
-     "Highest-fit standard questions for this specific role. Starred ⭐ in Question Bank."),
-]
+_PREP_STATE_CHIP = {
+    0.0: ('<span class="ib-chip ib-chip-gap">no answer yet</span>'),
+    0.5: ('<span class="ib-chip ib-chip-neutral">draft — unreviewed</span>'),
+    1.0: ('<span class="ib-chip ib-chip-complete">you\'ve worked on it</span>'),
+}
 
 
-def _focus_list(conn, process_id):
-    topics = conn.execute(
-        """SELECT topic_text, source, priority FROM prep_topic
-           WHERE process_id = ? ORDER BY priority DESC""", (process_id,)).fetchall()
-    if not topics:
-        st.caption("No focus items yet for this process.")
+def _prep_plan(conn, process_id, days_to_interview, master_resume):
+    """The screen you actually prepare from: a short ranked list of real
+    questions, highest-value first. Replaces the old grouped focus list,
+    which sorted by the SYSTEM's internal source type (requirement_gap /
+    high_risk_claim / ...) rather than by what you're most likely to be
+    asked, and phrased every row as a topic rather than as a question
+    anybody would actually say out loud."""
+    plan = interview_prep.build_prep_plan(conn, process_id, days_to_interview)
+    if not plan:
+        st.caption("Nothing to plan yet — create a process from a JD first.")
         return
-    grouped = {}
-    for t in topics:
-        grouped.setdefault(t["source"], []).append(t)
 
-    st.markdown('<div class="ib-label">Focus list — what to prepare first</div>',
+    if days_to_interview is not None and days_to_interview <= 1:
+        horizon = "Interview is imminent — this is the short drill list."
+    elif days_to_interview is not None and days_to_interview <= 7:
+        horizon = f"{days_to_interview} days out — enough time to write these properly."
+    else:
+        horizon = "Plenty of runway — work down this list, and build stories in parallel."
+    st.markdown(f'<div class="ib-label">Prepare these first · {len(plan)} questions</div>'
+               f'<div style="font-size:0.85em;opacity:0.75;margin-bottom:0.6rem">{horizon} '
+               f'Ranked by how likely you are to be asked and how much it costs you to '
+               f'fumble it. Answered items sink but stay visible.</div>',
                unsafe_allow_html=True)
-    any_shown = False
-    for source_key, title, blurb in _FOCUS_GROUPS:
-        items = grouped.get(source_key, [])
-        if not items:
-            continue
-        any_shown = True
-        st.markdown(f'<div class="ib-focus-group"><div class="ib-focus-title">{title}</div>'
-                   f'<div style="font-size:0.82em;opacity:0.7;margin-bottom:0.3em">{blurb}</div>',
-                   unsafe_allow_html=True)
-        for t in items[:5]:
-            st.markdown(f"- {html.escape(t['topic_text'])}")
-        if len(items) > 5:
-            st.caption(f"+ {len(items) - 5} more")
-        st.markdown("</div>", unsafe_allow_html=True)
-    if not any_shown:
-        st.caption("No focus items yet for this process.")
+
+    for i, item in enumerate(plan, 1):
+        chip = _PREP_STATE_CHIP.get(item["prepared"], "")
+        context = item.get("context") or ""
+        ctx_html = (f'<div style="opacity:0.6;font-size:0.8em;margin-top:0.35em">'
+                    f'{html.escape(context[:120])}{"…" if len(context) > 120 else ""}</div>'
+                    if context else "")
+        with st.expander(f"{i}. {item['question_text']}"):
+            st.markdown(
+                f'<div style="margin-bottom:0.4rem">{chip}</div>'
+                f'<div style="font-size:0.86em;opacity:0.8">{html.escape(item["why"])}</div>'
+                f'{ctx_html}', unsafe_allow_html=True)
+            if item["prepared"] > 0:
+                _answer_editor(conn, process_id, item["question_source"],
+                               item["question_ref_id"], item["question_text"], context,
+                               scope="plan")
+            else:
+                if st.button("Draft an answer", type="primary",
+                             key=f"ib_plan_gen_{item['question_source']}_{item['question_ref_id']}"):
+                    claim = None
+                    if item["question_source"] != "base_question" and context:
+                        claim = {"claim_text": context, "source_company": None}
+                    with st.spinner("Drafting…"):
+                        interview_answers.generate_answer_for_question(
+                            conn, process_id, item["question_source"],
+                            item["question_ref_id"], item["question_text"],
+                            claim, master_resume)
+                    conn.commit()  # st.rerun() unwinds via exception -- see the
+                                   # note at the other rerun sites.
+                    st.rerun()
+
+
+def _open_gaps_view(conn, process_id):
+    """Kept separate from the question plan on purpose: a JD gap is not a
+    question, it's a position you need to hold when they push on it."""
+    gaps = interview_prep.open_gaps(conn, process_id)
+    if not gaps:
+        return
+    st.markdown('<div class="ib-label">Where this JD outruns your resume</div>'
+               '<div style="font-size:0.85em;opacity:0.75;margin-bottom:0.4rem">'
+               'They will find these. Have an honest line ready for each — what you '
+               'have done that is adjacent, and how fast you would close it.</div>',
+               unsafe_allow_html=True)
+    for g in gaps:
+        tone = "ib-chip-gap" if g["match_status"] == "gap" else "ib-chip-neutral"
+        st.markdown(
+            f'<div class="ib-card" style="padding:0.5rem 0.9rem;">'
+            f'<span class="ib-chip {tone}">{g["tier"].replace("_", "-")}</span>'
+            f'{html.escape(g["requirement_text"])}</div>', unsafe_allow_html=True)
 
 
 # -------------------------------------------------------------- claim picker
@@ -380,13 +415,35 @@ def _current_version_row(conn, process_id, question_source, question_ref_id):
         (process_id, question_source, question_ref_id)).fetchone()
 
 
-def _answer_editor(conn, process_id, question_source, question_ref_id, question_text, claim_text):
+def _answer_editor(conn, process_id, question_source, question_ref_id, question_text,
+                   claim_text, scope="x"):
+    """`scope` namespaces every widget key to the CALLER. Streamlit executes
+    all tab bodies on every run, and the same question can now legitimately
+    appear in more than one tab (the prep plan surfaces questions that also
+    live under Resume Claims), so an unscoped key collides outright --
+    StreamlitDuplicateElementKey, found live the moment the plan shipped."""
     row = _current_version_row(conn, process_id, question_source, question_ref_id)
     if not row:
         st.caption("No draft yet.")
         return
 
     interview_answers.mark_skimmed(conn, row["id"])
+    uid = f"{scope}_{question_source}_{row['id']}"
+
+    # Drill mode: hide the answer, try to say it, then reveal. Re-reading a
+    # prepared answer feels like preparation and mostly isn't -- retrieval
+    # practice is the part that survives into the room. Needs no Phase 2
+    # engine: it's a visibility toggle over content that already exists.
+    drill_key = f"ib_drill_{uid}"
+    drilling = st.toggle("🎤 Drill mode — hide the answer, say it out loud first",
+                         key=drill_key)
+    if drilling:
+        st.markdown(
+            '<div class="ib-card" style="text-align:center;opacity:0.75">'
+            'Answer hidden. Say your version out loud, all the way through, '
+            'then reveal and compare.</div>', unsafe_allow_html=True)
+        if not st.checkbox("Reveal answer", key=f"{drill_key}_reveal"):
+            return
 
     st.markdown(f'<div class="ib-label">What this tests</div>'
                f'<div style="opacity:0.85;font-size:0.9em;margin-bottom:0.6rem">'
@@ -398,11 +455,11 @@ def _answer_editor(conn, process_id, question_source, question_ref_id, question_
     preview_html = _render_fillin_blanks(row["body_text"])
     st.markdown(f'<div class="ib-card">{preview_html}</div>', unsafe_allow_html=True)
 
-    edit_key = f"ib_edit_{question_source}_{row['id']}"
+    edit_key = f"ib_edit_{uid}"
     edited = st.text_area("Edit this answer", value=row["body_text"], height=180, key=edit_key)
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    if c1.button("Save revision", key=f"ib_save_{question_source}_{row['id']}"):
+    if c1.button("Save revision", key=f"ib_save_{uid}"):
         if edited != row["body_text"]:
             interview_answers.revise_answer(conn, process_id, question_source,
                                             question_ref_id, edited)
@@ -416,7 +473,7 @@ def _answer_editor(conn, process_id, question_source, question_ref_id, question_
             st.rerun()
         else:
             st.caption("No change to save.")
-    if c2.button("Regenerate", key=f"ib_regen_{question_source}_{row['id']}"):
+    if c2.button("Regenerate", key=f"ib_regen_{uid}"):
         master_resume = _master_resume()
         claim = dict(id=row["claim_id"], claim_text=claim_text, source_company=None)
         with st.spinner("Regenerating…"):
@@ -428,7 +485,7 @@ def _answer_editor(conn, process_id, question_source, question_ref_id, question_
                        # happen explicitly before every rerun, or the write
                        # this button just made is silently lost.
         st.rerun()
-    if c3.button("Critique", key=f"ib_critique_{question_source}_{row['id']}"):
+    if c3.button("Critique", key=f"ib_critique_{uid}"):
         import interview_llm
         with st.spinner("Critiquing (live)…"):
             crit = interview_llm.critique_answer(question_text, edited)
@@ -440,7 +497,7 @@ def _answer_editor(conn, process_id, question_source, question_ref_id, question_
             unsafe_allow_html=True)
         if not crit["quote_verified"]:
             st.caption("Couldn't verify the quoted span against your answer verbatim — read this one with a bit more scrutiny.")
-    if c4.button("Evaluate", key=f"ib_eval_{question_source}_{row['id']}"):
+    if c4.button("Evaluate", key=f"ib_eval_{uid}"):
         result = interview_answers.evaluate_prepared_answer(conn, row["id"])
         if result["status"] == "unavailable":
             st.info(result["detail"])
@@ -476,7 +533,7 @@ def _read_through_section(conn, process_id, claim_row, questions, question_sourc
             with st.expander(f"{label}{gap_note}"):
                 st.markdown(chips, unsafe_allow_html=True)
                 _answer_editor(conn, process_id, question_source, q["id"],
-                               q["question_text"], claim_row["claim_text"])
+                               q["question_text"], claim_row["claim_text"], scope="claim")
         else:
             st.caption(f"○ {label} — not generated yet")
 
@@ -574,7 +631,7 @@ def _base_question_row(conn, process_id, q, master_resume, starred=False):
         with st.expander(f"{label}{gap_note}{star}"):
             st.markdown(chips, unsafe_allow_html=True)
             _answer_editor(conn, process_id, "base_question", q["id"], q["text"],
-                           qb.CATEGORY_LABELS.get(q["category"], ""))
+                           qb.CATEGORY_LABELS.get(q["category"], ""), scope="bank")
     else:
         cols = st.columns([5, 1])
         cols[0].caption(f"○ {label}{star}")
@@ -799,18 +856,100 @@ def _claims_tab(conn, process_id, claims, master_resume):
 
 # ------------------------------------------------------------- overview tab
 
-def _overview_tab(conn, process_id):
-    fit = _fit_rollup(conn, process_id)
-    if fit is not None:
-        st.markdown(f'<div class="ib-label">Your fit against this JD</div>'
-                   f'<div style="font-size:1.4rem;color:var(--brass)">{fit}%</div>'
-                   f'<div style="opacity:0.7;font-size:0.85em">Weighted by requirement tier '
-                   f'(must-have counts more) — a rollup of the matched/partial/gap calls, '
-                   f'not a new judgment.</div>', unsafe_allow_html=True)
-    st.markdown("")
-    _progress_bar(conn, process_id)
-    st.markdown("")
-    _focus_list(conn, process_id)
+def _jd_quality_banner(conn, process_id, master_resume):
+    """The deterministic extractor is job_pipeline's bulk n-gram scorer. On a
+    single JD read literally, it emits fragments ('gathering', 'seamless',
+    one literally named 'key') as must-have requirements -- and the fit
+    rollup is computed over that same set, so a polluted read is a
+    misleading percentage, not just an ugly list. Offer the one-call upgrade
+    explicitly rather than silently spending it at intake."""
+    row = conn.execute(
+        "SELECT analyst, COUNT(*) AS n FROM jd_requirement WHERE process_id=? GROUP BY analyst",
+        (process_id,)).fetchone()
+    if row and row["analyst"] == "llm":
+        return
+    st.warning(
+        "**JD requirements were read by the fast lexical extractor** — it's built for "
+        "scoring 500 postings a day, not for reading one closely, so it emits filler "
+        "fragments as if they were requirements. Your fit % is computed over that same "
+        "list. One model call re-reads this JD properly.")
+    if st.button("Re-read this JD properly", type="primary", key="ib_reanalyze_jd"):
+        with st.spinner("Re-reading the JD…"):
+            result = interview_prep.reanalyze_process_jd(conn, process_id, master_resume)
+        if result["ok"]:
+            st.success(f"Re-read done — {len(result['requirement_ids'])} real requirements.")
+            conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
+            st.rerun()
+        else:
+            st.error("Couldn't get a clean model read just now — keeping the existing "
+                     "requirements rather than dropping them. Try again in a moment.")
+
+
+def _overview_tab(conn, process_id, days_to_interview, master_resume):
+    _jd_quality_banner(conn, process_id, master_resume)
+
+    plan = interview_prep.build_prep_plan(conn, process_id, days_to_interview)
+    _prep_plan(conn, process_id, days_to_interview, master_resume)
+
+    st.divider()
+    _open_gaps_view(conn, process_id)
+
+    st.divider()
+    # Deliberately BELOW the plan and the gaps. These are scoreboard numbers:
+    # useful to glance at, never the thing you act on, and putting them at the
+    # top (as the first build did) pushed the actual work below the fold.
+    with st.expander("📊 Where you stand (fit %, coverage)"):
+        fit = _fit_rollup(conn, process_id)
+        if fit is not None:
+            st.markdown(f'<div class="ib-label">Fit against this JD</div>'
+                       f'<div style="font-size:1.3rem;color:var(--brass)">{fit}%</div>'
+                       f'<div style="opacity:0.7;font-size:0.82em">Weighted by requirement tier. '
+                       f'A rollup of the matched/partial/gap calls — only as good as the '
+                       f'requirement list it runs over.</div>', unsafe_allow_html=True)
+        st.markdown("")
+        _progress_bar(conn, process_id, plan)
+
+
+# ------------------------------------------------------- night-before export
+
+def _night_before_export(conn, process_id, days_to_interview):
+    """One flat page of your prepared answers, downloadable.
+
+    The hour before an interview you are on a phone in a lobby, not clicking
+    through five tabs and ten sub-tabs. Everything here already exists in the
+    app -- this is purely a different surface for it, which is exactly why
+    it's worth having."""
+    with st.expander("📄 Export a one-page prep sheet (for the night before)"):
+        proc = conn.execute(
+            "SELECT company_name, role_title FROM interview_process WHERE id=?",
+            (process_id,)).fetchone()
+        plan = interview_prep.build_prep_plan(conn, process_id, days_to_interview, limit=40)
+        gaps = interview_prep.open_gaps(conn, process_id, limit=8)
+
+        lines = [f"# {proc['company_name']} — {proc['role_title']}", ""]
+        if days_to_interview is not None:
+            lines += [f"_Interview in {days_to_interview} day(s)._", ""]
+        lines += ["## Questions to have ready", ""]
+        for i, item in enumerate(plan, 1):
+            v = _current_version_row(conn, process_id, item["question_source"],
+                                     item["question_ref_id"])
+            lines.append(f"**{i}. {item['question_text']}**")
+            lines.append("")
+            lines.append(v["body_text"] if v else "_(no answer prepared yet)_")
+            lines.append("")
+        if gaps:
+            lines += ["## Gaps they may push on", ""]
+            lines += [f"- **{g['requirement_text']}** ({g['tier'].replace('_','-')}, "
+                      f"{g['match_status']})" for g in gaps]
+            lines.append("")
+        md = "\n".join(lines)
+
+        answered = sum(1 for i in plan if i["prepared"] > 0)
+        st.caption(f"{len(plan)} questions, {answered} with a prepared answer.")
+        st.download_button(
+            "⬇️ Download prep sheet (.md)", data=md.encode("utf-8"),
+            file_name=f"prep_{(proc['company_name'] or 'interview').replace(' ', '_')}.md",
+            mime="text/markdown", key="ib_export_md")
 
 
 # ---------------------------------------------------------------------- main
@@ -836,12 +975,21 @@ def render():
             (process_id,)).fetchone()["n"]
         fact_tab_label = f"✅ Fact Review ({fact_count})" if fact_count else "✅ Fact Review"
 
-        tab_overview, tab_claims, tab_bank, tab_stories, tab_facts = st.tabs([
-            "🎯 Overview", "📋 Resume Claims", "🗂️ Question Bank", "📖 Story Bank", fact_tab_label,
+        sched = conn.execute(
+            "SELECT scheduled_date FROM interview_process WHERE id=?",
+            (process_id,)).fetchone()
+        days_to_interview = _days_to(sched["scheduled_date"]) if sched else None
+
+        # Tab order is the actual prep workflow, not a tour of the data model:
+        # what to do now -> the claims they'll dig into -> the full bank for
+        # lookup -> stories -> housekeeping. Fact Review is last because it's
+        # a chore, not preparation.
+        tab_plan, tab_claims, tab_bank, tab_stories, tab_facts = st.tabs([
+            "🎯 Prep Plan", "📋 Resume Claims", "🗂️ Question Bank", "📖 Story Bank", fact_tab_label,
         ])
 
-        with tab_overview:
-            _overview_tab(conn, process_id)
+        with tab_plan:
+            _overview_tab(conn, process_id, days_to_interview, master_resume)
         with tab_claims:
             _claims_tab(conn, process_id, claims, master_resume)
         with tab_bank:
@@ -850,3 +998,6 @@ def render():
             _story_bank(conn, master_resume, claims)
         with tab_facts:
             _fact_review_queue(conn, process_id)
+
+        st.divider()
+        _night_before_export(conn, process_id, days_to_interview)

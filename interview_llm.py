@@ -362,6 +362,108 @@ def generate_answer_draft(question_text: str, claim_text: str, company: str,
     return {"answer_text": answer_text, "regenerated": regenerated}
 
 
+JD_ANALYSIS_PROMPT = """Read this job description and extract what the
+POSTING actually asks for. Extract requirements only -- do not evaluate any
+candidate, and do not invent a requirement the posting does not state.
+
+JOB TITLE: {role_title}
+COMPANY: {company_name}
+
+JOB DESCRIPTION:
+{jd_text}
+
+Each requirement must be a real competency, skill, or qualification a
+recruiter would recognise -- "mobile banking product management", "SQL",
+"stakeholder management with senior leadership". NEVER emit a bare
+sentence fragment or filler word ("gathering", "solution", "overview",
+"seamless", "highly motivated", "key") -- those are not requirements and
+are worse than useless to someone preparing for this interview.
+
+Return ONLY a JSON object with exactly these keys, no markdown fences, no
+commentary:
+{{
+  "must_have_skills": ["competencies the posting states as REQUIRED"],
+  "preferred_skills": ["competencies framed as preferred / nice-to-have"],
+  "key_skills": ["other genuine competencies the posting names"],
+  "min_years": null,
+  "education_level": "degree the JD requires, empty string if none stated",
+  "mandatory_eligibility": ["hard gates only: visa, clearance, licence, mandatory relocation"]
+}}"""
+
+_JD_ANALYSIS_MAX_CHARS = 6000
+_STOPISH = {"and", "or", "the", "a", "an", "of", "for", "with", "in", "on",
+            "to", "at", "by", "as"}
+
+
+def _grounded_in_jd(requirement: str, jd_lower: str) -> bool:
+    """A returned requirement must actually come from the posting. Every
+    content word in it has to appear in the JD text -- this is what stops a
+    model inventing a requirement that would then silently move the fit
+    score against a job that never asked for it (the same failure
+    tailor.py's own jd_analysis note warns about)."""
+    words = [w for w in re.findall(r"[a-z0-9+#.]+", requirement.lower())
+             if w not in _STOPISH]
+    if not words:
+        return False
+    return all(w in jd_lower for w in words)
+
+
+def analyze_jd_llm(jd_text: str, role_title: str = "", company_name: str = "",
+                   config: dict | None = None, call_fn=None) -> dict | None:
+    """One LLM read of a single JD, shaped exactly like jd_analyst.analyze_jd()
+    so it can be folded in through the existing merge_llm_analysis() path.
+
+    Why this exists: jd_analyst.analyze_jd() is job_pipeline's BULK extractor
+    -- deliberately lexical and noisy because it runs on ~500 postings a day
+    where noise averages out inside a score. Its own _phrases() docstring says
+    it "cannot tell a competency from a stray noun phrase, which is exactly
+    why the LLM analyst overrides it where one is available." Interview prep
+    reads that output LITERALLY, one JD at a time, so the noise stops being
+    harmless dilution and becomes prep items like 'gathering' and 'seamless'
+    (found live). One call per interview process is trivially affordable --
+    generating a single claim's answers already costs ~20.
+
+    Returns None on any failure, so the caller keeps the deterministic read
+    rather than losing requirement extraction entirely."""
+    call_fn = call_fn or resolve_free_call_fn(config)
+    jd_excerpt = (jd_text or "").strip()[:_JD_ANALYSIS_MAX_CHARS]
+    if not jd_excerpt:
+        return None
+    prompt = JD_ANALYSIS_PROMPT.format(
+        jd_text=jd_excerpt, role_title=role_title or "unspecified",
+        company_name=company_name or "unspecified")
+    try:
+        parsed = tailor._extract_json(call_fn(prompt))
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+
+    jd_lower = jd_excerpt.lower()
+    out = {}
+    for tier in ("must_have_skills", "preferred_skills", "key_skills"):
+        vals = parsed.get(tier) or []
+        if not isinstance(vals, list):
+            vals = []
+        cleaned = []
+        for v in vals:
+            v = str(v).strip()
+            # Grounding + a floor on triviality: a one-word filler token is
+            # exactly the failure mode being fixed here, so reject it even
+            # when it does technically appear in the JD.
+            if len(v) < 3 or not _grounded_in_jd(v, jd_lower):
+                continue
+            if v.lower() not in {c.lower() for c in cleaned}:
+                cleaned.append(v)
+        out[tier] = cleaned
+    if not any(out.values()):
+        return None
+    for passthrough in ("min_years", "education_level", "mandatory_eligibility"):
+        if parsed.get(passthrough) is not None:
+            out[passthrough] = parsed[passthrough]
+    return out
+
+
 CRITIQUE_PROMPT = """You are critiquing a candidate's own written interview
 answer, in this exact format (T§5.5): OBSERVATION (quote their own words),
 WHY IT MATTERS (what an interviewer infers from that), HOW TO IMPROVE (one

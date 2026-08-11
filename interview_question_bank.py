@@ -164,6 +164,45 @@ CATEGORY_BASE_IMPORTANCE = {
 }
 
 
+# Per-question likelihood, for the questions whose real-world frequency is
+# clearly not their category average. CATEGORY_BASE_IMPORTANCE alone is too
+# coarse: it scored "Tell me about yourself" -- which opens essentially every
+# interview ever conducted -- identically to "Where do you see yourself in
+# 3-5 years", so a ranked plan could and did drop the opener entirely (found
+# live on a 1-day-out plan). Anything not listed here falls back to its
+# category prior; these are well-known frequencies, not model output.
+QUESTION_LIKELIHOOD = {
+    1: 0.98,   # Tell me about yourself
+    2: 0.92,   # Walk me through your resume
+    68: 0.95,  # Why do you want to join us specifically?
+    69: 0.92,  # Why this role, specifically?
+    83: 0.95,  # What questions do you have for us?
+    5: 0.88,   # Why are you looking for a change now?
+    11: 0.88,  # Tell me about your current role
+    70: 0.88,  # Why are you a strong fit
+    58: 0.85,  # Tell me about a time you failed
+    72: 0.82,  # What gaps do you have, honestly
+    17: 0.82,  # Most impactful thing you've shipped
+    77: 0.80,  # Compensation expectations
+    78: 0.78,  # Notice period
+    # Genuinely less frequent than their category average implies.
+    10: 0.45,  # Where do you see yourself in 3-5 years
+    67: 0.45,  # Biggest lesson your career has taught you
+    75: 0.50,  # Who are our biggest competitors
+    76: 0.45,  # Compare our approach to your current company's
+    81: 0.45,  # What would make you say no
+    18: 0.45,  # If you had another quarter there
+}
+
+
+def question_likelihood(q: dict) -> float:
+    """Per-question frequency where known, category prior otherwise."""
+    explicit = QUESTION_LIKELIHOOD.get(q["id"])
+    if explicit is not None:
+        return explicit
+    return CATEGORY_BASE_IMPORTANCE.get(q["category"], 0.5)
+
+
 def relevant_questions(jd_text: str, role_title: str) -> list[dict]:
     """Every base question, tagged with whether its tags matched the JD/role
     text -- a tagged question scores higher but an untagged one (most

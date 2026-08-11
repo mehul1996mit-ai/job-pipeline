@@ -119,6 +119,90 @@ genuinely different emphasis, zero fact-integrity violations either way.
 Both smoke suites still pass unaffected (fake-double tests, no process
 context to thread).
 
+**✅ Interview Prep re-architected around a ranked prep plan (2026-08-12) —
+and the root cause of the "confusing focus list" turned out to be a data
+bug, not a layout one.** Mehul asked to reorder the UI by interview
+priority, flagging the coverage bar and focus list as low-value clutter.
+Investigating first was the right call:
+
+1. **The focus list was showing garbage, and it polluted the fit score.**
+   `jd_analyst.analyze_jd()` is job_pipeline's BULK extractor (its own
+   `_phrases()` docstring: "cannot tell a competency from a stray noun
+   phrase, which is exactly why the LLM analyst overrides it where one is
+   available"). Interview prep reused it and reads the output LITERALLY, one
+   JD at a time — so it stored `'gathering'`, `'solution'`, `'seamless'`
+   (matched!), `'highly motivated'` and one literally named `'key'` as
+   must-have requirements, while the genuinely interview-relevant gaps sat a
+   tier below. `_fit_rollup()` runs over that same set, so the 43% was not a
+   number to trust either. Fixed with `interview_llm.analyze_jd_llm()` +
+   `interview_prep.reanalyze_process_jd()` — one grounded LLM read per
+   process (trivial next to the ~20 calls one claim's answers already cost),
+   surfaced as an explicit "Re-read this JD properly" button rather than
+   silently spent at intake (§4.2 requires intake stay synchronous).
+   **Requirements are now 100% real** — live-verified: "regulatory, security
+   and governance compliance in banking", "customer journey optimization",
+   zero fragments.
+   - **Deliberately NOT `merge_llm_analysis()`** for the skill tiers. That
+     helper keeps a deterministic finding when the LLM returns empty, which
+     is right for bulk scoring and wrong here: found live, the model
+     correctly returned `must_have_skills=[]` for a JD stating no hard
+     requirements, and the merge dutifully restored `'gathering'`/`'solution'`.
+     Read literally by a human, a junk requirement is worse than none.
+   - Follow-on caught same session: `open_gaps()` originally filtered to
+     `must_have`/`preferred`, which showed ZERO gaps on exactly that kind of
+     JD. Now ranks across all tiers.
+2. **Focus list → ranked prep plan, question-shaped.** The old list grouped
+   by the SYSTEM's internal `prep_topic.source` (requirement_gap /
+   high_risk_claim / ...) and phrased every row as a topic ("Defend the
+   ownership/impact of: ..."), which is a description of work, not something
+   anyone actually says to you. New `interview_prep.build_prep_plan()` ranks
+   real questions by likelihood × stakes, discounted by preparedness, and is
+   **day-aware** (`scheduled_date` was previously displayed and then totally
+   unused): 1 day out → 10 items, 14 days → 40. Three real ranking bugs
+   found by reading the output rather than trusting the maths, each now a
+   standing smoke guard:
+   - 7 of the top 10 were two repeated question texts (a template exists per
+     claim) → `_MAX_REPEATS_PER_QUESTION`.
+   - A 1-day plan came back with ZERO standard questions — no "tell me about
+     yourself", no "why us" — because claim-defense outscored them all →
+     `_BASE_QUESTION_FLOOR`.
+   - "Tell me about yourself" *still* vanished once it had a draft. Root
+     cause was `CATEGORY_BASE_IMPORTANCE` being too coarse (all 10 intro
+     questions shared one prior, so the most certain question in any
+     interview tied with "where do you see yourself in 3-5 years") → new
+     `interview_question_bank.QUESTION_LIKELIHOOD` per-question overrides,
+     plus `_ALWAYS_REHEARSE`: at likelihood ≥0.9 a question is never
+     discounted for already having an answer. **That was a framing error on
+     my part — I'd built a gap-filler when a day-out list needs to be a
+     rehearsal list.**
+3. **Coverage metric fixed, not just demoted.** "6 of 313 (2%)" measured
+   against every question that exists; nobody drafts 313, so the denominator
+   was unreachable by construction and real effort read as no progress. Now
+   counts the ranked plan ("3 of 10 priority questions"), and sits in a
+   collapsed "Where you stand" expander BELOW the plan and gaps.
+4. **Two genuinely new, zero-backend additions**: drill mode (hide answer →
+   say it out loud → reveal; retrieval practice, not re-reading, is what
+   survives into the room) and a one-page markdown prep-sheet export (the
+   hour before an interview you are on a phone in a lobby, not clicking
+   through five tabs).
+
+**One real bug found only by live-clicking**, same class as this file's
+earlier entries: the prep plan surfaces questions that also live under
+Resume Claims, and Streamlit executes every tab body on every run, so the
+shared `_answer_editor()` widget keys collided outright
+(`StreamlitDuplicateElementKey`). Fixed with a caller `scope=` prefix on
+every key. 10 new smoke guards; `interview_smoke_test.py`,
+`answer_bank_smoke_test.py`, `smoke_test.py`, `career_agent_smoke_test.py`
+all pass.
+
+**Where I pushed back on Mehul and he was wrong:** he bucketed "Claims that
+need a strong defense" with the noise as low-value. That section is the
+highest-value thing in the app — finding the biggest number and probing
+ownership is *literally what an interviewer does*. It read as low-value
+because I rendered it badly (truncated mid-word, phrased as a topic, no
+action, visually identical to the `'seamless'` junk above it), not because
+the content was wrong. It now sits at the top of the plan as real questions.
+
 ## STATUS (last updated 2026-08-11)
 
 **🟢 Interview Prep & Practice toolkit — Phase 1 (preparation) built,
