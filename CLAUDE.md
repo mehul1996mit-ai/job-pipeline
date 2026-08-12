@@ -7,21 +7,34 @@ a "Career Agent" section — read that first for A2/A3/A5/A8/A9 — and an
 resume claims, interview questions, or the "🗂️ Interview Prep" dashboard
 tab) and `GCC_COVERAGE_GUIDE.md` has the manual-application layer.
 
-**Interview Prep Toolkit (2026-08-11) — Phase 1 (Preparation) is fully
-built and live-verified; Phase 2 (Practice — adaptive interviewer, live
-evaluation, mock interviews, readiness scoring) does not exist and was
-repeatedly, deliberately declined across four master prompts this session.**
-New files: `interview_store.py`, `interview_prep.py`, `interview_stories.py`,
-`interview_answers.py`, `interview_llm.py`, `interview_question_bank.py`,
-`interview_ui.py` (dashboard tab), plus `interview_smoke_test.py` and
-`answer_bank_smoke_test.py`. Read the README section first for the
-architecture table; the detailed entries below (search "Interview Prep" /
-"Answer Bank" / "Question Bank") have the full build history, every design
-call, and three real bugs found only by live-clicking the UI (a missing
-429 retry, an `st.rerun()` silently discarding writes, a process-switch
-that never switched) — worth reading before touching `interview_ui.py`.
-None of this touches the job pipeline, `career_agent.sqlite3`, or outreach
-in any way — separate database, separate tab, separate concern.
+**Interview Prep Toolkit (2026-08-11, re-architected 2026-08-12) — Phase 1
+(Preparation) is fully built and live-verified; Phase 2 (Practice —
+adaptive interviewer, live evaluation, mock interviews, readiness scoring)
+does not exist and was repeatedly, deliberately declined across four master
+prompts.** Dashboard tab is five tabs, each with one job: 🎯 Prep Plan (a
+short, ranked, day-aware list of REAL questions — not internal topic
+labels — this is the screen you actually prepare from), 📋 Resume Claims,
+🗂️ Question Bank (every question, all base questions in their category,
+not just a ranked slice), 📖 Story Bank (fully editable SITAR stories), ✅
+Fact Review. New files: `interview_store.py`, `interview_prep.py`,
+`interview_stories.py`, `interview_answers.py`, `interview_llm.py`,
+`interview_question_bank.py`, `interview_ui.py` (dashboard tab), plus
+`interview_smoke_test.py` and `answer_bank_smoke_test.py`. Read the README
+section first for the architecture table; the detailed dated entries below
+(search "Interview Prep" / "Answer Bank" / "Question Bank" / "Story Bank" /
+"prep plan") have the full build history, every design call, and real bugs
+found only by live-clicking the UI (a missing 429 retry, an `st.rerun()`
+silently discarding writes, a process-switch that never switched, a
+`StreamlitDuplicateElementKey` once the same question could appear in two
+tabs, a fit score quietly computed over lexical JD-extraction noise) —
+worth reading before touching `interview_ui.py`, `interview_prep.py`, or
+`interview_llm.py` again. None of this touches the job pipeline,
+`career_agent.sqlite3`, or outreach in any way — separate database,
+separate tab, separate concern. **Each subsystem's SQLite database
+(`interview_prep.sqlite3`, `career_agent.sqlite3`) only exists on whichever
+Streamlit instance created it — nothing syncs a local DB to the hosted app
+or back, by design; Mehul has chosen to work only on the hosted dashboard
+(https://job-1357.streamlit.app) going forward, see the 2026-08-12 entry.**
 
 **Career Agent's original 9-agent scope is now fully built (A2/A3/A5/A8/A9,
 all extending job_pipeline in place) — see the A9 entry directly below.**
@@ -259,7 +272,7 @@ All four smoke suites (`interview_smoke_test.py` — 13 new checks total this
 pass, `answer_bank_smoke_test.py`, `smoke_test.py`,
 `career_agent_smoke_test.py`) pass.
 
-## STATUS (last updated 2026-08-11)
+## STATUS (last updated 2026-08-12)
 
 **🟢 Interview Prep & Practice toolkit — Phase 1 (preparation) built,
 Phase 2 (practice/evaluation) deliberately not started.** A separate master

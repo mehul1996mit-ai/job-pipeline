@@ -298,7 +298,8 @@ Full auto-send was asked for and explicitly declined; see `CLAUDE.md`'s
 
 Run: `python company_targeting.py` (A2) → `python authority_graph.py` (A3, reports existing nodes — discovery is manual research, see module docstring) → `python outreach_crm.py` (A9, prints refit readiness + due follow-ups, runs Gmail sent/reply detection if `gmail_auth` is set up) — contact resolution and outreach itself are still called programmatically (`contact_resolution.resolve_contact()`, `outreach.draft_outreach()`), no CLI wrapper yet. Full build history and every debugged gotcha (OAuth Cloud-Console bot-detection, the Google Auth Platform UI's Test-users location, WebSearch summaries that turned out wrong on verification) is in `CLAUDE.md`'s STATUS block, 2026-08-04 through 2026-08-09 entries.
 
-## Interview Prep Toolkit — Phase 1 only (extension, added 2026-08-11)
+## Interview Prep Toolkit — Phase 1 only (extension, added 2026-08-11,
+## rebuilt around a ranked prep plan 2026-08-12)
 
 A second, separate extension layered onto this same repo (own database,
 `data/interview_prep.sqlite3`, `INTERVIEW_DB_PATH` overridable — never
@@ -307,49 +308,64 @@ description, it turns your resume into an interrogatable candidate model:
 every bullet becomes a claim with a computed interview-risk score, gets a
 question tree and (if it carries a metric) a ten-question metrics-defense
 set, and the JD gets matched against your resume to surface real gaps and
-a curated slice of a 83-question general PM/behavioral/HR bank. First-pass
-answers are drafted for all of it (free-tier LLM, fact-checked against
-`resume_master.json` — a fabricated number is a hard regeneration, then a
-hard failure, never a silent pass), which you then edit, critique, or
-regenerate. **Practice — an adaptive AI interviewer, live evaluation,
-mock interviews, readiness scoring — does not exist.** This is Phase 1
-(Preparation) only; every "Practice"/"Readiness"/"Interview Day" screen a
-master prompt asked for was deliberately left unbuilt rather than shipped
-with no real data behind it. See `CLAUDE.md`'s 2026-08-11 entries for the
-full reasoning on what was built vs. declined across four separate master
-prompts for this subsystem.
+a curated slice of an 83-question general PM/behavioral/HR bank. First-pass
+answers are drafted for all of it (free-tier LLM, tailored to the specific
+target company/role/JD — not a generic answer — and fact-checked against
+`resume_master.json`: a fabricated number is a hard regeneration, then a
+hard failure, never a silent pass), which you then edit, critique, drill
+out loud, or regenerate. **Practice — an adaptive AI interviewer, live
+evaluation, mock interviews, readiness scoring — does not exist.** This is
+Phase 1 (Preparation) only; every "Practice"/"Readiness"/"Interview Day"
+screen a master prompt asked for was deliberately left unbuilt rather than
+shipped with no real data behind it. See `CLAUDE.md`'s 2026-08-11/08-12
+entries for the full reasoning on what was built vs. declined.
+
+The dashboard tab is organized into five tabs, each with one job:
+
+| Tab | What it's for |
+|---|---|
+| 🎯 Prep Plan | The screen you actually prepare from — a short, ranked list of REAL questions (not internal topic labels), day-aware (10 items a day out, 40 two weeks out), with an explicit "re-read this JD properly" upgrade and the genuine JD gaps below it. |
+| 📋 Resume Claims | Pick one resume bullet, generate its follow-up-question tree and (if it carries a number) its metrics-defense set. |
+| 🗂️ Question Bank | Every question that exists, one sub-tab per category — all of them, not just the ranked slice — plus a searchable flat table. |
+| 📖 Story Bank | Full SITAR stories, editable field by field, with a "fill in the details" section for the 8 supporting fields (team size, stakeholders, trade-offs, ...) a first draft can't know. |
+| ✅ Fact Review | Confirm/reject/resolve any number your own edits introduced against what the resume already states. |
 
 | Piece | Module(s) | What it does |
 |---|---|---|
 | Candidate model & claims | `interview_prep.py` | One `ResumeClaim` per bullet, extracted verbatim (never generated) — metric, ownership signal (I/we/passive/absent), and a computed risk score (metric + ambiguous ownership = the exact combination a follow-up exposes). Candidate differentiators pulled from `resume_master.json`'s achievements. All deterministic, zero API cost. |
 | Question tree & metrics defense | `interview_prep.py` | Ten fixed question types per claim (What/Why/How/Who/Your role/Data/Impact/Trade-off/Failure/Change) and, for any claim with a number, a ten-dimension metrics interrogation (baseline/timeframe/measurement/causality/trade-offs/etc.) — both templated, not LLM-generated. |
-| JD intake & gap mapping | `interview_prep.py` (`process_new_jd`) | Reuses `jd_analyst.analyze_jd()` (deterministic requirement extraction) and `skill_match.match_skill()` (the same layered exact/alias/stem/phrase matcher the job-scoring engine uses) to classify every requirement matched/partial/gap against your resume — no new matching logic. |
-| Base question bank | `interview_question_bank.py` | 83 curated, static questions across 10 categories (intro/career, current role, PM fundamentals, product-sense cases, metrics, stakeholder management, execution, behavioral, target company/role, HR) — the categories a claim-derived tree structurally can't produce. Folded into the same prep-topic priority list, capped at 10/process, ranked by category importance + JD/role tag match. |
-| Story bank | `interview_stories.py` | SITAR (Situation/Task/Action/Result/Reflection) stories, guided or LLM-drafted from a claim, with the same fact-integrity check as answer drafting. Any field the candidate hasn't supplied is a literal `[YOU FILL: ...]` placeholder, never guessed. Flags competencies with zero mapped stories. |
-| Answer Bank | `interview_answers.py` | Append-only versioned answers (`generate`/`author`/`revise`/`correct_extraction`/`correct_import`), batch generation across a claim's full question set, and per-answer fact-candidate detection feeding a confirm/reject/conflict-resolution queue — a candidate value that contradicts the resume halts and asks, never silently overwrites `resume_master.json`. |
-| LLM plumbing | `interview_llm.py` | Free-tier only (Gemini/Groq — Anthropic is deliberately excluded, it's a paid model in this repo's config). Every generation function takes an injectable `call_fn` so tests run with zero API keys. One regeneration on a fact violation, then a hard failure. Includes `critique_answer()` — Observation/Why it matters/How to improve feedback with a verbatim-quote check, no numeric score (a real score belongs to the evaluation engine that doesn't exist yet). |
-| Dashboard tab | `interview_ui.py`, dashboard "🗂️ Interview Prep" tab | Process switcher (multiple concurrent target companies, T§14 isolation), the full claim/question/story/fact-review flow, a unified filterable Question Bank view across all question sources, and a JD-fit rollup — all styled with a dedicated dark case-file/field-note token system (`--ink`/`--paper`/`--brass`), deliberately not the generic navy-SaaS look repeatedly requested and repeatedly declined (see `CLAUDE.md`). |
+| JD intake & gap mapping | `interview_prep.py` (`process_new_jd`) | Reuses `jd_analyst.analyze_jd()` — job_pipeline's own BULK, deliberately lexical scorer — for the synchronous intake read (§4.2 requires this stay call-free). A single-JD read of that output is noisy on purpose (it's built to average out across 500 postings/day, not to be read literally); `interview_prep.reanalyze_process_jd()` + `interview_llm.analyze_jd_llm()` offer one grounded LLM re-read per process (surfaced as an explicit dashboard button) that replaces it with real, JD-grounded requirements. |
+| Ranked prep plan | `interview_prep.py` (`build_prep_plan`) | Real questions — not topics — ranked by likelihood × stakes, discounted by how prepared you already are, sized to how many days remain (`plan_size_for`). Near-certain openers ("tell me about yourself", "why us") are never scored out even once answered; a hard cap stops one templated question from flooding the list across claims. |
+| Base question bank | `interview_question_bank.py` | 83 curated, static questions across 10 categories (intro/career, current role, PM fundamentals, product-sense cases, metrics, stakeholder management, execution, behavioral, target company/role, HR) — the categories a claim-derived tree structurally can't produce. Per-question `QUESTION_LIKELIHOOD` overrides the category-level prior for questions whose real frequency isn't their category's average. |
+| Story bank | `interview_stories.py` | SITAR (Situation/Task/Action/Result/Reflection) stories, guided or LLM-drafted from a claim, with the same fact-integrity check as answer drafting. Fully editable after drafting (`update_story()`/`delete_story()` — a hand-edit is trusted the same as a hand-typed answer, not re-run through the fact-integrity regenerate path). Any field the candidate hasn't supplied is a literal `[YOU FILL: ...]` placeholder, never guessed; flags competencies with zero mapped stories as styled chips. |
+| Answer Bank | `interview_answers.py` | Append-only versioned answers (`generate`/`author`/`revise`/`correct_extraction`/`correct_import`), batch generation across a claim's full question set, and per-answer fact-candidate detection feeding a confirm/reject/conflict-resolution queue — a candidate value that contradicts the resume halts and asks, never silently overwrites `resume_master.json`. Generation reads the active process's own target company/role/JD text and threads it into the prompt, so two different target roles produce genuinely different emphasis from the same underlying facts, not interchangeable generic answers. |
+| LLM plumbing | `interview_llm.py` | Free-tier only (Gemini/Groq — Anthropic is deliberately excluded, it's a paid model in this repo's config). Every generation function takes an injectable `call_fn` so tests run with zero API keys. One regeneration on a fact violation, then a hard failure. Plain, conversational language is enforced by prompt (no corporate jargon, no AI-cliché filler) — this is spoken practice material, not a LinkedIn post. Includes `critique_answer()` — Observation/Why it matters/How to improve feedback with a verbatim-quote check, no numeric score (a real score belongs to the evaluation engine that doesn't exist yet). |
+| Dashboard tab | `interview_ui.py`, dashboard "🗂️ Interview Prep" tab | Process switcher (multiple concurrent target companies, T§14 isolation), the five tabs above, drill mode (hide the answer, say it out loud, then reveal — retrieval practice over re-reading), and a one-page markdown prep-sheet export for the night before. Styled with a dedicated dark case-file/field-note token system (`--ink`/`--paper`/`--brass`), deliberately not the generic navy-SaaS look repeatedly requested and repeatedly declined (see `CLAUDE.md`). |
 
-**Current real state (2026-08-11):** all of the above is built, unit-tested
-(`interview_smoke_test.py` + `answer_bank_smoke_test.py`, ~90 checks
+**Current real state (2026-08-12):** all of the above is built, unit-tested
+(`interview_smoke_test.py` + `answer_bank_smoke_test.py`, 100+ checks
 combined, offline/zero-keys via fake `call_fn` doubles) and live-verified
-both against the real Gemini API and by actually clicking through the
-Streamlit tab against a real job description (ICICI Bank, Digital Product
-Manager) — including three real bugs found only by that live use, not the
-offline suite: a missing 429/503 retry (present in `tailor.py`'s own
-tailoring path but never ported here), a Streamlit `st.rerun()` silently
-discarding every write in the same script run because it unwinds through
-the DB connection's commit-on-normal-exit context manager, and a process
-switch that never actually switched because `st.radio`'s persisted widget
-state can't be reassigned after that widget has already rendered in the
-same run. All three fixed and re-verified live — see `CLAUDE.md` for the
-mechanism of each, worth reading before touching `interview_ui.py` again.
+against the real Gemini API and by actually clicking through the hosted
+Streamlit dashboard against a real job description (ICICI Bank, Digital
+Product Manager). Several real bugs were found only by that live use, not
+the offline suite — a missing 429/503 retry, an `st.rerun()` silently
+discarding writes because it unwinds through the DB connection's
+commit-on-normal-exit context manager, a process switch that never actually
+switched, `StreamlitDuplicateElementKey` once the same question could
+legitimately appear in two tabs, and a fit score quietly computed over
+lexical noise ('gathering', 'solution', one requirement literally named
+'key') because the bulk JD scorer was being read as if it were a
+single-posting analyst. All fixed and re-verified live — see `CLAUDE.md`
+for the mechanism of each, worth reading before touching `interview_ui.py`,
+`interview_prep.py`, or `interview_llm.py` again.
 
 No CLI wrapper — everything is called programmatically or through the
 dashboard tab today (`interview_prep.process_new_jd(...)`,
 `interview_answers.generate_answer_batch(...)`). Run the dashboard the same
 way as the rest of the app (`streamlit run streamlit_app.py`) and open the
-"🗂️ Interview Prep" tab.
+"🗂️ Interview Prep" tab. Live at https://job-1357.streamlit.app — this
+subsystem's own database only exists on whichever instance you use it from
+(local vs. hosted), by design (see `CLAUDE.md`, 2026-08-12).
 
 ## Free-tier setup (one-time, ~20 minutes)
 
