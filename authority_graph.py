@@ -173,7 +173,7 @@ def add_node(conn, company_name, person_name, title, source,
 
     node_id = store.insert_authority_node(
         conn, row["id"], person_name, source, datetime.datetime.utcnow().isoformat(),
-        title=title, function=function, seniority_band=node_type,
+        title=title, function=function, node_type=node_type,
         owns_req_likelihood=likelihood, warm_path_distance=distance,
         warm_path_via=via, public_profile_url=public_profile_url,
         confidence=confidence,
@@ -226,7 +226,7 @@ def run(db_path=None):
         for n in nodes:
             _, req_count = a2.score_hiring_activity(n["company_name"], hiring_counts)
             has_open_req = req_count > 0 if n["function"] else None
-            likelihood, _ = owns_req_likelihood(n["seniority_band"], n["headcount_estimate"], has_open_req)
+            likelihood, _ = owns_req_likelihood(n["node_type"], n["headcount_estimate"], has_open_req)
             distance, via = warm_path_distance(n["person_name"], network_entries)
             conn.execute(
                 "UPDATE authority_node SET owns_req_likelihood = ?, "
@@ -251,4 +251,4 @@ if __name__ == "__main__":
         print(f"\n{company}:")
         for n in nodes:
             print(f"  {n['owns_req_likelihood']:.2f}  wp={n['warm_path_distance']}  "
-                  f"{n['person_name']} — {n['title']} ({n['seniority_band']})")
+                  f"{n['person_name']} — {n['title']} ({n['node_type']})")

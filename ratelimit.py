@@ -18,7 +18,12 @@ def clamp(configured_value, ceiling):
 
 
 def drafts_created_today(conn, today=None):
-    today = today or datetime.date.today().isoformat()
+    """`today` compared against `outreach.created_at` (UTC — see outreach.py's
+    datetime.datetime.utcnow() stamp). Must stay UTC on both sides: comparing
+    against a local calendar date shifted the cap's window by up to 5.5h on
+    an IST machine, silently allowing more than MAX_DRAFTS_PER_DAY real
+    Gmail drafts within one local day."""
+    today = today or datetime.datetime.utcnow().date().isoformat()
     row = conn.execute(
         "SELECT COUNT(*) AS n FROM outreach WHERE substr(created_at, 1, 10) = ?",
         (today,),

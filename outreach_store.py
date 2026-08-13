@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS authority_node (
     person_name TEXT NOT NULL,
     title TEXT,
     function TEXT,
-    seniority_band TEXT,
+    node_type TEXT,                             -- A3's function_owner|hiring_manager|ta_lead_function|generic_ta
+    seniority_band TEXT,                        -- an actual seniority band (junior/senior/VP/...), never node_type
     owns_req_likelihood REAL,
     warm_path_distance INTEGER,
     warm_path_via TEXT,
@@ -146,6 +147,19 @@ def init_db(db_path=DB_PATH):
             ("gmail_message_id", "TEXT"),
             ("gmail_thread_id", "TEXT"),
         ])
+        _migrate_add_columns(conn, "authority_node", [
+            ("node_type", "TEXT"),
+        ])
+        # One-time backfill: node_type was previously (mis)written into
+        # seniority_band (see CLAUDE.md 2026-08-12 audit finding). Copy it
+        # across for any existing row that has a seniority_band value
+        # matching a real node_type enum but no node_type of its own yet —
+        # never touches a row that already has node_type set, and never
+        # touches seniority_band itself (it may hold a real value already).
+        conn.execute(
+            """UPDATE authority_node SET node_type = seniority_band
+               WHERE node_type IS NULL AND seniority_band IN
+                 ('function_owner', 'hiring_manager', 'ta_lead_function', 'generic_ta')""")
 
 
 def _load_valid_consent_basis():
@@ -163,14 +177,21 @@ def _load_valid_node_sources():
 
 
 def insert_authority_node(conn, company_id, person_name, source, created_at,
-                           title=None, function=None, seniority_band=None,
+                           title=None, function=None, node_type=None,
+                           seniority_band=None,
                            owns_req_likelihood=None, warm_path_distance=None,
                            warm_path_via=None, public_profile_url=None,
                            confidence=None):
     """The only permitted write path for authority_node. Raises ValueError if
     `source` isn't on policy/authority_node_sources.yaml — node discovery is
     restricted to public non-scraped sources + manual entry (master prompt
-    §5.2), no social-graph traversal. There is no bypass parameter."""
+    §5.2), no social-graph traversal. There is no bypass parameter.
+
+    `node_type` is A3's function_owner/hiring_manager/ta_lead_function/
+    generic_ta classification; `seniority_band` is a real seniority band
+    (junior/senior/VP/...) if one is ever known. These are separate columns
+    — node_type was previously (mis)written into seniority_band, see
+    CLAUDE.md's 2026-08-12 audit finding, fixed here."""
     if not source:
         raise ValueError("source is required (see policy/authority_node_sources.yaml)")
     valid = _load_valid_node_sources()
@@ -181,11 +202,11 @@ def insert_authority_node(conn, company_id, person_name, source, created_at,
         )
     cur = conn.execute(
         """INSERT INTO authority_node
-           (company_id, person_name, title, function, seniority_band,
+           (company_id, person_name, title, function, node_type, seniority_band,
             owns_req_likelihood, warm_path_distance, warm_path_via,
             public_profile_url, source, confidence, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (company_id, person_name, title, function, seniority_band,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (company_id, person_name, title, function, node_type, seniority_band,
          owns_req_likelihood, warm_path_distance, warm_path_via,
          public_profile_url, source, confidence, created_at),
     )

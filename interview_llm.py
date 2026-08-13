@@ -29,9 +29,7 @@ from __future__ import annotations
 
 import json
 import re
-import time
 
-import requests
 
 import tailor  # reuse _call_gemini/_call_groq/_extract_json — provider plumbing only
 from interview_stories import check_fact_integrity, _all_resume_numbers
@@ -46,25 +44,19 @@ class InterviewFactIntegrityError(RuntimeError):
 
 
 def _default_call_fn(provider: str, model: str):
-    """Same one-retry-after-a-pause discipline as tailor.py's tailor_job()
-    (see tailor.py's own 429/503 handling) -- that retry lived only in the
-    job-tailoring caller, not in _call_gemini/_call_groq themselves, so
-    calling them directly here (as every function in this module does)
-    skipped it entirely. A batch of even one claim's 10 questions can mean
-    up to 20 calls (10 questions x up to 2 attempts each for I3
-    regeneration) fired back to back with no pacing at all -- exactly what
-    trips the free-tier rate limit, confirmed live against a real 429."""
+    """Reuses tailor.call_with_retry() for the same one-retry-after-a-pause
+    discipline as tailor.py's tailor_job() -- this used to be a hand-rolled
+    duplicate of that logic (see CLAUDE.md's 2026-08-12 audit finding); now
+    both share one implementation, so a backoff-policy change only has to
+    land once. A batch of even one claim's 10 questions can mean up to 20
+    calls (10 questions x up to 2 attempts each for I3 regeneration) fired
+    back to back with no pacing at all -- exactly what trips the free-tier
+    rate limit, confirmed live against a real 429."""
     call = FREE_PROVIDERS[provider]
 
     def _call(prompt: str) -> str:
-        try:
-            return call(prompt, model)
-        except requests.exceptions.HTTPError as e:
-            status = e.response.status_code if e.response is not None else None
-            if status in (429, 503):
-                time.sleep(20)
-                return call(prompt, model)
-            raise
+        return tailor.call_with_retry(call, prompt, model,
+                                      context=f"interview_llm: {provider}")
     return _call
 
 

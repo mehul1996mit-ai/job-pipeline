@@ -252,13 +252,20 @@ def index_text(text: str) -> dict:
     return {"tokens": tokens, "bigrams": bigrams}
 
 
-def compute_match(jd_text: str, cv_text: str, domain_keywords=None) -> dict:
+def compute_match(jd_text: str, cv_text: str, domain_keywords=None, cv_index=None) -> dict:
     """Score a job description against the user's FULL CV text.
 
     Returns score/base/bonus/coverage/matched/missing/bonus_keywords plus the
     raw weights, so callers can explain the number rather than assert it.
+
+    `cv_index`: pass a pre-computed index_text(cv_text) result to skip
+    re-tokenizing the same (constant, per-run) CV text on every call —
+    matcher.score_job() runs up to 3x per job listing across a daily run,
+    so main.py computes this once and threads it through. Falls back to
+    computing it here when not supplied, so existing callers (tests, the
+    dashboard) are unaffected.
     """
-    cv = index_text(cv_text)
+    cv = cv_index if cv_index is not None else index_text(cv_text)
     cv_lower = str(cv_text or "").lower()
     jd_lower = str(jd_text or "").lower()
 

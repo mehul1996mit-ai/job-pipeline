@@ -16,10 +16,15 @@ short, ranked, day-aware list of REAL questions — not internal topic
 labels — this is the screen you actually prepare from), 📋 Resume Claims,
 🗂️ Question Bank (every question, all base questions in their category,
 not just a ranked slice), 📖 Story Bank (fully editable SITAR stories), ✅
-Fact Review. New files: `interview_store.py`, `interview_prep.py`,
+Fact Review, plus a sixth tab added 2026-08-12: 🏢 Company Research
+(company/industry facts, financial metrics, current-vs-target company
+comparison, current-vs-target role comparison — see that day's entry
+below). New files: `interview_store.py`, `interview_prep.py`,
 `interview_stories.py`, `interview_answers.py`, `interview_llm.py`,
-`interview_question_bank.py`, `interview_ui.py` (dashboard tab), plus
-`interview_smoke_test.py` and `answer_bank_smoke_test.py`. Read the README
+`interview_question_bank.py`, `interview_research.py` (2026-08-12),
+`interview_ui.py` (dashboard tab), plus `interview_smoke_test.py`,
+`answer_bank_smoke_test.py`, and `interview_research_smoke_test.py`
+(2026-08-12). Read the README
 section first for the architecture table; the detailed dated entries below
 (search "Interview Prep" / "Answer Bank" / "Question Bank" / "Story Bank" /
 "prep plan") have the full build history, every design call, and real bugs
@@ -215,6 +220,163 @@ ownership is *literally what an interviewer does*. It read as low-value
 because I rendered it badly (truncated mid-word, phrased as a topic, no
 action, visually identical to the `'seamless'` junk above it), not because
 the content was wrong. It now sits at the top of the plan as real questions.
+
+**✅ Company research + current-vs-target comparison built (2026-08-12) —
+scoped down from a much larger 77-section "Interview Intelligence OS"
+master prompt after an explicit audit found most of it unbuilt.** A new
+master prompt asked to build everything the audit flagged missing:
+full company/financial/competitor research, mock interviews, rapid fire,
+final-day mode, a 0-100 readiness score, numeric answer scoring, a
+Next.js/FastAPI/Postgres rewrite. Pushed back on most of it before
+building anything (Mehul's own instruction: "challenge it with what's
+already built first, then choose whether to build or not") —
+
+**Declined, and why:** the stack rewrite (throws away a live, tested app for
+zero interview-prep value, same reasoning that killed two prior navy/indigo
+re-theme requests); mock interview/rapid-fire/final-day (real, but lower
+value than the comparison feature actually asked for, and correctly
+deferred to a follow-up rather than half-building five things at once —
+this repo's own history shows that pattern fails, e.g. the fourth master
+prompt Mehul himself stopped mid-implementation); a 0-100 readiness score
+(already declined twice before, on E3/I7 grounds — a composite number over
+sparse inputs is false precision); numeric answer scores like "6.8/10"
+(free-tier LLM judging a spoken answer has real test-retest variance —
+built a non-numeric structured checklist instead, see below).
+
+**Built:** `interview_research.py` — industry classification (§7, keyword-
+deterministic, zero LLM cost, labels itself fact vs inference per §36),
+an industry-specific financial-metric library (§8 — banking/NBFC/housing
+finance, insurance, SaaS, e-commerce, manufacturing, plus a narrow generic
+fallback rather than guessing a bespoke list per industry), company
+research + metric collection via Gemini's grounded `google_search` tool,
+and — the actual literal ask — current-vs-target **company comparison**
+(§12/13, explicit comparable/partially-comparable/not-comparable labeling,
+never a forced comparison across mismatched industries) and current-vs-
+target **role comparison** (§22, fully deterministic from the already-
+parsed CV + JD, zero research/LLM dependency, so it works even when
+company research doesn't). New tables in `interview_store.py`: `company`,
+`company_fact`, `company_comparison`, `role_comparison`. New UI tab
+`🏢 Company Research` in `interview_ui.py`, inserted between Prep Plan and
+Resume Claims. `interview_research_smoke_test.py` — 17 offline checks
+(industry classification, idempotent company rows, fake-double research/
+metrics calls, `ResearchUnavailable` never silently swallowed, comparison
+labeling including the cross-industry not-comparable case, role comparison
+persistence) — all pass, plus all four pre-existing smoke suites
+re-confirmed green (no regressions).
+
+**Real technical finding, not assumed:** live-tested the grounded
+`google_search` call against the real Gemini key before building anything
+on it, per this repo's own "verify the primary source" discipline (the
+Fibe/Tata Capital/Razorpay false-lead catches earlier in this file). Plain
+generation calls succeed (HTTP 200); the grounded call returns
+`429 RESOURCE_EXHAUSTED` specifically — search-grounding sits on its own,
+separate, much stingier free-tier quota from plain text generation, not a
+shared pool. `research_company()`/`collect_financial_metrics()` raise
+`ResearchUnavailable` rather than silently falling back to an ungrounded
+model guess about a real company's financials — confirmed live in the UI
+(clicking "Research target company" against the real ICICI Bank process
+surfaced the clean error message, no crash, no fabricated data). **Company
+research is built but not yet actually usable until the grounding quota
+resets or a different key/tier is used** — this is a real, live-verified
+gap, not a hypothetical one. Role comparison and the comparison-table
+mechanics needed no live grounding to verify and were confirmed against the
+real ICICI Bank process data (6 dimensions, all correctly pulled from the
+candidate's actual CV bullets — including one `dont_overemphasize` case,
+product ownership, where the CV shows it strongly but the JD doesn't
+emphasize it, exactly the §22 distinction the spec asks for).
+
+**One explicit, deliberate departure from this repo's own I3 fact-integrity
+discipline, on direct instruction:** company/industry facts
+(`company_fact` rows) have **no confirmation gate and no stored source
+URL** — they write directly and are usable immediately in generated
+content, the same trust level as the candidate's own resume claims. Raised
+once, with the concrete mechanism (this repo has three confirmed incidents
+of a wrong AI-summarized company fact — Fibe's CPO, a Tata Capital
+appointment, a Razorpay contact email — each caught only because something
+forced a verify-before-use step); Mehul overruled it explicitly after
+hearing the objection. Standing going forward: if a wrong company fact
+surfaces in a real interview answer, this is the known, accepted tradeoff
+that produced it, not a bug to silently patch back to a gated design.
+
+**Deferred to a follow-up session, not stubbed:** mock interview with
+personas (§29/30), a non-numeric structured answer-evaluation checklist
+(§31, scoped down from the declined numeric score), final-day mode (§42),
+questions-to-ask-the-interviewer (§43). None of these need company research
+to already exist except final-day/questions-to-ask, which are gated on it
+anyway.
+
+**✅ Full-repo audit (7 correctness/reuse/simplification/efficiency findings,
+all fixed same session, 2026-08-12).** A general "audit the full job_pipeline
+and make it better" request was scoped via the `code-review` skill in
+path-target mode (8 finder angles + 1-vote verify, covering the core daily
+pipeline, Career Agent, and Interview Prep). All 7 confirmed findings were
+fixed and re-verified against all 5 smoke suites plus a live browser check:
+1. **matcher.py's `passes_filters()` still hard-rejected over-experienced
+   jobs via the old `experience_ok()` check before `score_job()`/
+   `seniority.judge()` ever ran** — directly contradicting the documented
+   2026-08-09 redesign that made over-seniority a soft penalty. A JD stating
+   "8+ years" was silently dropped from the queue entirely, even though
+   `comfort_max_years=8.0` wouldn't have flagged it. Fixed: `experience_ok()`
+   removed from `passes_filters()`'s hard-AND chain (kept as a function,
+   still smoke-tested directly — just no longer used as a pre-filter).
+   **This is the highest-value fix in the batch** — it was silently shrinking
+   the live daily queue.
+2. **`ratelimit.drafts_created_today()` compared OS-local date against a
+   UTC-stamped `created_at`** — the F4 20-drafts/day cap on the real
+   Gmail-send path could be exceeded in the 18:30–05:30 IST window. Same bug
+   fixed in `outreach_crm.due_followups()`. Both now compare UTC to UTC.
+3. **`outreach_crm._outcome_rows()` read `authority_node.seniority_band` and
+   treated it as the A3 `node_type` enum** — worked only by coincidence
+   (nothing else had ever written a real seniority value there). Fixed with
+   a real `node_type` column (`outreach_store.py`, idempotent migration +
+   one-time backfill from the old misused column), updated the write path
+   (`authority_graph.py`) and both read sites.
+4. **`interview_prep._base_question_topics()` ranked base questions via the
+   coarse `CATEGORY_BASE_IMPORTANCE` prior instead of
+   `qb.question_likelihood()`'s per-question overrides** — the Question Bank
+   tab's ⭐ ranking could disagree with the Prep Plan tab's ranking for the
+   identical question. Fixed: both now call the same per-question function.
+5. **The candidate's CV was re-tokenized from scratch inside every
+   `matcher.score_job()` call** (up to 3x per job listing across a daily
+   run — initial pass, Workday full-JD rescore, post-tailoring rescore) with
+   zero caching anywhere. Fixed with optional `cv_index`/`skill_cv_index`/
+   `skill_cv_lower` params threaded from `main.py` (computed once, CV is
+   constant for the whole run) through `matcher.score_job()` →
+   `frozen_score()`/`structured_skill_match()`, falling back to recomputing
+   when not supplied so no other caller needed to change.
+   **Verified byte-identical scoring output** (same score/frozen_score/
+   sub_scores/flags) between the precomputed-index and fallback paths before
+   trusting it — a perf change to a formula this project has calibration
+   guards around gets zero benefit of the doubt.
+6. **`interview_llm.py` hand-rolled the same 429/503 retry-after-pause logic
+   that already existed in `tailor.py`**, as two independently-maintained
+   copies (the module's own docstring admitted this). Factored into
+   `tailor.call_with_retry()`, reused by both callers — a backoff change now
+   only has to land once.
+7. **The commit-before-`st.rerun()` pattern was copy-pasted at 20 separate
+   sites in `interview_ui.py`** instead of centralized — the exact bug class
+   this project's own history documents being found and fixed multiple times
+   already (see the 2026-08-04 entry). Centralized into
+   `_commit_and_rerun(conn)`; all 20 sites converted via a scripted
+   transformation that asserted each site matched the exact expected pattern
+   before rewriting (would have raised on any mismatch — none did).
+   **Verified the actual mechanism directly** rather than trusting a browser
+   click: simulated `st.rerun()`'s exception-based unwind against a real
+   `interview_store.connect()` block and confirmed the write survives the
+   exception skipping past the context manager's normal-exit-only commit —
+   the identical failure mode the 2026-08-04 bug was about. (Live browser
+   verification hit two unrelated preview-server disconnects with zero
+   traceback in either server log — consistent with prior sessions'
+   documented browser-tooling flakiness, not a code issue; the direct
+   mechanism test is arguably the more rigorous check anyway.)
+
+Two additional candidates were checked and **refuted** during the audit's
+verify pass, not reported: a claimed provider-registry drift risk in
+`interview_llm.py` (a real runtime guard already rejects any non-free
+provider, not just a docstring promise) and a claimed dict-equality dedup
+bug in `interview_prep.build_prep_plan()` (the dedup key includes
+`question_ref_id`, which is a DB primary key — two genuinely distinct
+questions can't collide).
 
 **✅ Story Bank rebuilt, and "incomplete claim lines" turned out to be a
 display bug, not corrupted resume data (2026-08-12).** Mehul reported two

@@ -361,7 +361,11 @@ def _base_question_topics(conn, process_id: int) -> list[dict]:
         return []
     scored = []
     for q in qb.relevant_questions(proc["jd_text"], proc["role_title"]):
-        importance = qb.CATEGORY_BASE_IMPORTANCE.get(q["category"], 0.5)
+        # Same per-question likelihood build_prep_plan() uses (checks
+        # QUESTION_LIKELIHOOD overrides before the category prior) — using
+        # the coarse category prior here instead let this tab's star-ranking
+        # disagree with the Prep Plan tab's ranking for the same question.
+        importance = qb.question_likelihood(q)
         score = min(1.0, importance + (0.1 if q["tag_matched"] else 0))
         scored.append((score, q))
     scored.sort(key=lambda pair: -pair[0])

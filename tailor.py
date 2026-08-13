@@ -185,6 +185,25 @@ PROVIDERS = {"gemini": ("gemini_model", _call_gemini),
              "anthropic": ("anthropic_model", _call_anthropic)}
 
 
+def call_with_retry(call_fn, prompt: str, model: str, log=print,
+                    context: str = "", retry_delay: int = 20) -> str:
+    """One polite retry after a pause on HTTP 429/503 -- not a retry-hammer,
+    just enough to ride out a transient free-tier throttle. Shared by every
+    caller of a free-tier LLM provider in this repo (this function, and
+    interview_llm.py's resolver) so a change to the backoff policy only has
+    to happen once. Re-raises whatever the final attempt raised -- callers
+    decide their own fallback behavior on failure."""
+    try:
+        return call_fn(prompt, model)
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        if status in (429, 503):
+            log(f"{context} {status} — retrying once after {retry_delay}s")
+            time.sleep(retry_delay)
+            return call_fn(prompt, model)
+        raise
+
+
 def tailor_job(cv_text: str, job: dict, missing_keywords: list[str],
                config: dict, log=print) -> dict:
     tcfg = config.get("tailor", {})
@@ -201,29 +220,8 @@ def tailor_job(cv_text: str, job: dict, missing_keywords: list[str],
         missing_keywords=", ".join(missing_keywords) or "none",
     )
     try:
-        raw = call(prompt, model)
-    except requests.exceptions.HTTPError as e:
-        status = e.response.status_code if e.response is not None else None
-        if status in (429, 503):
-            # One polite retry after a short pause -- not a retry-hammer,
-            # just enough to ride out a transient free-tier throttle.
-            log(f"tailor: {provider} {status} for '{job.get('title')}' — "
-                "retrying once after 20s")
-            time.sleep(20)
-            try:
-                raw = call(prompt, model)
-            except Exception as e2:
-                log(f"tailor: {provider} retry failed for "
-                    f"'{job.get('title')}' ({e2})")
-                out = dict(EMPTY)
-                out["honest_gap_note"] = f"tailoring skipped ({e2})"
-                return out
-        else:
-            log(f"tailor: {provider} call failed for '{job.get('title')}' "
-                f"({e})")
-            out = dict(EMPTY)
-            out["honest_gap_note"] = f"tailoring skipped ({e})"
-            return out
+        raw = call_with_retry(call, prompt, model, log=log,
+                              context=f"tailor: {provider} for '{job.get('title')}' —")
     except Exception as e:
         log(f"tailor: {provider} call failed for '{job.get('title')}' ({e})")
         out = dict(EMPTY)

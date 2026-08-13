@@ -526,7 +526,7 @@ with store.connect(a9_db) as conn:
     )
     a9_company_id = conn.execute("SELECT id FROM company WHERE name='A9TestCo'").fetchone()["id"]
     conn.execute(
-        "INSERT INTO authority_node (company_id, person_name, source, seniority_band, "
+        "INSERT INTO authority_node (company_id, person_name, source, node_type, "
         "owns_req_likelihood, warm_path_distance, created_at) VALUES "
         "(?, 'CRM Node', 'user_manual_entry', 'function_owner', 0.9, 1, ?)",
         (a9_company_id, now),
@@ -644,7 +644,7 @@ with store.connect(a9_db) as conn:
                    + ["ta_lead_function"] * 4 + ["generic_ta"] * 4)
     for i, ntype in enumerate(synth_types):
         conn.execute(
-            "INSERT INTO authority_node (company_id, person_name, source, seniority_band, "
+            "INSERT INTO authority_node (company_id, person_name, source, node_type, "
             "owns_req_likelihood, warm_path_distance, created_at) VALUES "
             "(?, ?, 'user_manual_entry', ?, 0.5, 1, ?)",
             (a9_company_id, f"Synth {i}", ntype, now),
@@ -773,7 +773,7 @@ with store.connect(send_db) as conn:
     )
     send_company_id = conn.execute("SELECT id FROM company WHERE name='SendTestCo'").fetchone()["id"]
     conn.execute(
-        "INSERT INTO authority_node (company_id, person_name, source, seniority_band, created_at) "
+        "INSERT INTO authority_node (company_id, person_name, source, node_type, created_at) "
         "VALUES (?, 'Send Node', 'user_manual_entry', 'function_owner', ?)",
         (send_company_id, now),
     )
@@ -831,7 +831,7 @@ with store.connect(send_db) as conn:
     )
     eml_company_id = conn.execute("SELECT id FROM company WHERE name='EmlTestCo'").fetchone()["id"]
     conn.execute(
-        "INSERT INTO authority_node (company_id, person_name, source, seniority_band, created_at) "
+        "INSERT INTO authority_node (company_id, person_name, source, node_type, created_at) "
         "VALUES (?, 'Eml Node', 'user_manual_entry', 'function_owner', ?)",
         (eml_company_id, now),
     )

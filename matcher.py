@@ -115,8 +115,15 @@ def salary_ok(job: dict, min_salary_annual) -> bool:
 
 
 def passes_filters(job: dict, config: dict) -> bool:
+    """Experience deliberately is NOT checked here. seniority.judge() (wired
+    into matcher.score_job(), called downstream of this filter) applies
+    over-seniority as a configurable penalty to the FINAL score instead —
+    per the 2026-08-09 redesign documented in CLAUDE.md, so an affected job
+    still reaches the CSV with its verdict rather than vanishing before
+    scoring ever runs. experience_ok()/parse_experience_band() are kept
+    (and still smoke-tested directly) as the band-parsing primitives
+    seniority.py builds on, just no longer used as a hard pre-filter here."""
     f = config.get("filters", {})
-    my_years = float(config.get("profile", {}).get("experience_years", 0))
     if f.get("remote_only"):
         loc = (job.get("location", "") + " " + job.get("title", "")).lower()
         if "remote" not in loc and "work from home" not in loc:
@@ -124,7 +131,6 @@ def passes_filters(job: dict, config: dict) -> bool:
     return (
         title_ok(job.get("title", ""), f.get("title_keywords", []))
         and city_ok(job.get("location", ""), f.get("cities", []))
-        and experience_ok(job.get("description", ""), my_years)
         and salary_ok(job, f.get("min_salary_annual"))
     )
 
@@ -157,11 +163,11 @@ def _domain_keywords(config: dict):
     return config.get("scoring", {}).get("domain_keywords") or None
 
 
-def frozen_score(jd_text: str, cv_text: str, config: dict) -> dict:
+def frozen_score(jd_text: str, cv_text: str, config: dict, cv_index=None) -> dict:
     """The ported frozen engine. Full result dict, not just the number — the
     matched/missing term lists explain the score."""
     return compute_match(jd_text, cv_text,
-                         domain_keywords=_domain_keywords(config))
+                         domain_keywords=_domain_keywords(config), cv_index=cv_index)
 
 
 def _experience_verdict(title: str, jd_text: str, config: dict) -> dict:
@@ -193,10 +199,21 @@ def _experience_verdict(title: str, jd_text: str, config: dict) -> dict:
 
 
 def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
-              llm_analysis: dict | None = None, title: str = "") -> dict:
+              llm_analysis: dict | None = None, title: str = "",
+              cv_index: dict | None = None, skill_cv_index: dict | None = None,
+              skill_cv_lower: str | None = None) -> dict:
     """Score one posting through every layer. Fully deterministic unless an
     `llm_analysis` is supplied (from the tailoring call, which already happens
     for the top-N jobs) — so this is safe to run on every listing.
+
+    `cv_index`/`skill_cv_index`/`skill_cv_lower`: pre-computed CV indices
+    (scoring_core.index_text / skill_match.index_layers + lowercased text)
+    for the two scoring layers below. The candidate's CV is constant for the
+    whole run, but this function is called up to 3x per job listing (initial
+    pass, Workday full-JD rescore, post-tailoring rescore) — main.py computes
+    these once and threads them through instead of re-tokenizing the same CV
+    hundreds/thousands of times a day. Optional: falls back to recomputing
+    when not supplied, so existing callers are unaffected.
 
     Returns a flat dict suitable for stashing on the job record and writing to
     the CSV, plus the nested structures the dashboard can expand.
@@ -205,8 +222,9 @@ def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
     if llm_analysis:
         analysis = jd_analyst.merge_llm_analysis(analysis, llm_analysis)
 
-    frozen = frozen_score(jd_text, cv_text, config)
-    sm = structured_skill_match(analysis, structured_cv)
+    frozen = frozen_score(jd_text, cv_text, config, cv_index=cv_index)
+    sm = structured_skill_match(analysis, structured_cv,
+                                cv_index=skill_cv_index, cv_lower=skill_cv_lower)
 
     agg_kwargs = {
         "jd_text": jd_text,

@@ -165,18 +165,23 @@ def tier_of(skill: str, must_set: set, pref_set: set) -> str:
     return "unknown"
 
 
-def structured_skill_match(jd: dict, parsed_cv: dict) -> dict:
+def structured_skill_match(jd: dict, parsed_cv: dict, cv_index=None, cv_lower=None) -> dict:
     """Structured skill match: layered, weighted, evidence-aware.
 
     jd:        analyst output (key_skills / must_have_skills / preferred_skills)
     parsed_cv: parse_cv_structured output
+
+    `cv_index`/`cv_lower`: pass pre-computed index_layers(cv_text) + the
+    lowercased text to skip re-tokenizing the same (constant, per-run) CV on
+    every call — see scoring_core.compute_match()'s matching docstring note.
+    Falls back to computing them here when not supplied.
     """
     jd = jd or {}
     parsed_cv = parsed_cv or {}
     sections = parsed_cv.get("sections") or {}
     cv_text = "\n".join(sections.get(k, "") for k in sections)
-    cv = index_layers(cv_text)
-    cv_lower = cv_text.lower()
+    cv = cv_index if cv_index is not None else index_layers(cv_text)
+    cv_lower = cv_lower if cv_lower is not None else cv_text.lower()
     now = parsed_cv.get("now")
 
     must_set = {str(s).lower() for s in (jd.get("must_have_skills") or [])}

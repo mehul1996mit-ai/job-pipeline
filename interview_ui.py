@@ -32,6 +32,19 @@ import interview_prep
 import interview_stories
 import interview_answers
 import interview_question_bank as qb
+import interview_research as research
+
+
+# ---------------------------------------------------------------- rerun helper
+
+def _commit_and_rerun(conn):
+    """st.rerun() unwinds via exception -- connect()'s context manager only
+    commits on normal exit, so a write immediately followed by a rerun must
+    commit explicitly first, or it's silently lost. Centralized here (was
+    copy-pasted at 20 call sites, see CLAUDE.md's 2026-08-12 audit finding)
+    so the next write-then-rerun action can't reintroduce the same miss."""
+    conn.commit()
+    st.rerun()
 
 
 # ---------------------------------------------------------------- token CSS
@@ -227,11 +240,7 @@ def _process_switcher(conn):
                 st.success(f"Process created — {len(result['requirement_ids'])} JD "
                           f"requirements extracted, {len(result['topic_ids'])} prep "
                           "topics generated.")
-                conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                               # manager only commits on normal exit, so this must
-                               # happen explicitly before every rerun, or the write
-                               # this button just made is silently lost.
-                st.rerun()
+                _commit_and_rerun(conn)
 
 
 # ------------------------------------------------------------------ fit rollup
@@ -342,9 +351,7 @@ def _prep_plan(conn, process_id, days_to_interview, master_resume):
                             conn, process_id, item["question_source"],
                             item["question_ref_id"], item["question_text"],
                             claim, master_resume)
-                    conn.commit()  # st.rerun() unwinds via exception -- see the
-                                   # note at the other rerun sites.
-                    st.rerun()
+                    _commit_and_rerun(conn)
 
 
 def _open_gaps_view(conn, process_id):
@@ -466,11 +473,7 @@ def _answer_editor(conn, process_id, question_source, question_ref_id, question_
             fact_ids = interview_answers.detect_and_insert_fact_candidates(
                 conn, process_id, row["id"], edited, claim_ref=row["claim_id"])
             st.success(f"Saved. {len(fact_ids)} fact(s) detected for review in the Fact Review tab." if fact_ids else "Saved.")
-            conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                           # manager only commits on normal exit, so this must
-                           # happen explicitly before every rerun, or the write
-                           # this button just made is silently lost.
-            st.rerun()
+            _commit_and_rerun(conn)
         else:
             st.caption("No change to save.")
     if c2.button("Regenerate", key=f"ib_regen_{uid}"):
@@ -480,11 +483,7 @@ def _answer_editor(conn, process_id, question_source, question_ref_id, question_
             interview_answers.generate_answer_for_question(
                 conn, process_id, question_source, question_ref_id, question_text,
                 claim, master_resume)
-        conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                       # manager only commits on normal exit, so this must
-                       # happen explicitly before every rerun, or the write
-                       # this button just made is silently lost.
-        st.rerun()
+        _commit_and_rerun(conn)
     if c3.button("Critique", key=f"ib_critique_{uid}"):
         import interview_llm
         with st.spinner("Critiquing (live)…"):
@@ -577,41 +576,21 @@ def _fact_review_queue(conn, process_id):
             rc1, rc2, rc3 = st.columns(3)
             if rc1.button("Resume is right", key=f"ib_res_{fc['id']}"):
                 interview_answers.confirm_fact_candidate(conn, fc["id"], "resume_right")
-                conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                               # manager only commits on normal exit, so this must
-                               # happen explicitly before every rerun, or the write
-                               # this button just made is silently lost.
-                st.rerun()
+                _commit_and_rerun(conn)
             if rc2.button("New value is right", key=f"ib_new_{fc['id']}"):
                 interview_answers.confirm_fact_candidate(conn, fc["id"], "new_value_right")
-                conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                               # manager only commits on normal exit, so this must
-                               # happen explicitly before every rerun, or the write
-                               # this button just made is silently lost.
-                st.rerun()
+                _commit_and_rerun(conn)
             if rc3.button("Both — different metrics", key=f"ib_both_{fc['id']}"):
                 interview_answers.confirm_fact_candidate(conn, fc["id"], "both_different")
-                conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                               # manager only commits on normal exit, so this must
-                               # happen explicitly before every rerun, or the write
-                               # this button just made is silently lost.
-                st.rerun()
+                _commit_and_rerun(conn)
         else:
             rc1, rc2 = st.columns(2)
             if rc1.button("Confirm fact", key=f"ib_confirm_{fc['id']}"):
                 interview_answers.confirm_fact_candidate(conn, fc["id"])
-                conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                               # manager only commits on normal exit, so this must
-                               # happen explicitly before every rerun, or the write
-                               # this button just made is silently lost.
-                st.rerun()
+                _commit_and_rerun(conn)
             if rc2.button("Reject", key=f"ib_reject_{fc['id']}"):
                 interview_answers.reject_fact_candidate(conn, fc["id"])
-                conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                               # manager only commits on normal exit, so this must
-                               # happen explicitly before every rerun, or the write
-                               # this button just made is silently lost.
-                st.rerun()
+                _commit_and_rerun(conn)
 
 
 # ------------------------------------------------------------ base questions
@@ -640,11 +619,7 @@ def _base_question_row(conn, process_id, q, master_resume, starred=False):
                 interview_answers.generate_answer_for_question(
                     conn, process_id, "base_question", q["id"], q["text"],
                     None, master_resume)
-            conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                           # manager only commits on normal exit, so this must
-                           # happen explicitly before every rerun, or the write
-                           # this button just made is silently lost.
-            st.rerun()
+            _commit_and_rerun(conn)
 
 
 # --------------------------------------------------------------- story bank
@@ -716,8 +691,7 @@ def _story_detail_fields(conn, story_row):
                 key=f"ib_story_detail_{f}_{story_row['id']}")
         if st.button("Save details", key=f"ib_story_detail_save_{story_row['id']}"):
             interview_stories.update_story(conn, story_row["id"], None, **edits)
-            conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
-            st.rerun()
+            _commit_and_rerun(conn)
 
 
 def _story_card(conn, master_resume, story_row, comps):
@@ -740,20 +714,17 @@ def _story_card(conn, master_resume, story_row, comps):
         c1, c2, c3 = st.columns([1, 1, 1])
         if c1.button("Save", key=f"ib_story_save_{story_row['id']}"):
             interview_stories.update_story(conn, story_row["id"], master_resume, **edits)
-            conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
-            st.rerun()
+            _commit_and_rerun(conn)
         if not comps:
             comp_choice = c2.selectbox("Map to", options=_competency_names(conn),
                                        key=f"ib_story_comp_{story_row['id']}",
                                        label_visibility="collapsed")
             if c3.button("Map", key=f"ib_map_story_{story_row['id']}"):
                 interview_stories.map_story_to_competency(conn, story_row["id"], comp_choice)
-                conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
-                st.rerun()
+                _commit_and_rerun(conn)
         if st.button("Delete this story", key=f"ib_story_delete_{story_row['id']}"):
             interview_stories.delete_story(conn, story_row["id"])
-            conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
-            st.rerun()
+            _commit_and_rerun(conn)
 
         _story_detail_fields(conn, story_row)
 
@@ -796,8 +767,7 @@ def _story_bank(conn, master_resume, claims):
                 if result["ok"]:
                     st.success("Story drafted — see it in the list above. Open it to read the "
                               "full story, fill in any blanks, and map it to a competency.")
-                    conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
-                    st.rerun()
+                    _commit_and_rerun(conn)
                 else:
                     st.error(f"Rejected: {result['violations']}")
 
@@ -914,19 +884,11 @@ def _claims_tab(conn, process_id, claims, master_resume):
                 "Anything only you know will be left blank for you to fill.")
         if st.button("Generate answers for this claim", type="primary", key="ib_generate_claim"):
             _generate_for_claim(conn, process_id, claim_row, master_resume)
-            conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                           # manager only commits on normal exit, so this must
-                           # happen explicitly before every rerun, or the write
-                           # this button just made is silently lost.
-            st.rerun()
+            _commit_and_rerun(conn)
     else:
         if st.button("Regenerate any missing", key="ib_generate_claim_more"):
             _generate_for_claim(conn, process_id, claim_row, master_resume)
-            conn.commit()  # st.rerun() unwinds via exception -- connect()'s context
-                           # manager only commits on normal exit, so this must
-                           # happen explicitly before every rerun, or the write
-                           # this button just made is silently lost.
-            st.rerun()
+            _commit_and_rerun(conn)
         _read_through_queue(conn, process_id, claim_row)
 
 
@@ -954,8 +916,7 @@ def _jd_quality_banner(conn, process_id, master_resume):
             result = interview_prep.reanalyze_process_jd(conn, process_id, master_resume)
         if result["ok"]:
             st.success(f"Re-read done — {len(result['requirement_ids'])} real requirements.")
-            conn.commit()  # st.rerun() unwinds via exception -- see the other rerun sites.
-            st.rerun()
+            _commit_and_rerun(conn)
         else:
             st.error("Couldn't get a clean model read just now — keeping the existing "
                      "requirements rather than dropping them. Try again in a moment.")
@@ -984,6 +945,139 @@ def _overview_tab(conn, process_id, days_to_interview, master_resume):
                        f'requirement list it runs over.</div>', unsafe_allow_html=True)
         st.markdown("")
         _progress_bar(conn, process_id, plan)
+
+
+# ------------------------------------------------------------ company research
+
+def _current_company_role(master_resume):
+    """Derive current company/role from the CV's most recent experience
+    entry -- avoids asking for input the resume already states, per §3's own
+    'reuse candidate data dynamically' principle."""
+    exp = master_resume.get("experience", [])
+    if not exp:
+        return "Current company", "Current role"
+    company = exp[0].get("company", "Current company")
+    roles = exp[0].get("roles", [])
+    role_title = roles[0].get("title", "Current role") if roles else "Current role"
+    return company, role_title
+
+
+def _facts_by_category(conn, company_id):
+    rows = conn.execute(
+        "SELECT category, label, value, period, fact_type FROM company_fact "
+        "WHERE company_id=? ORDER BY category, label", (company_id,)).fetchall()
+    grouped = {}
+    for r in rows:
+        grouped.setdefault(r["category"], []).append(r)
+    return grouped
+
+
+def _research_company_card(conn, process_id, role, company_name, jd_text, industry_hint=""):
+    company_id = research.get_or_create_company(conn, process_id, role, company_name, jd_text)
+    row = conn.execute("SELECT * FROM company WHERE id=?", (company_id,)).fetchone()
+    label = "Target company" if role == "target" else "Current company"
+    st.markdown(f"**{label}: {company_name}**")
+    industry = row["industry"] or "general"
+    basis_note = "stated" if row["industry_basis"] == "fact" else "inferred — not stated explicitly"
+    st.caption(f"Industry: {industry.replace('_', ' ')} ({basis_note})")
+
+    grouped = _facts_by_category(conn, company_id)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button(f"Research {label.lower()}", key=f"research_{role}_{process_id}"):
+            try:
+                with st.spinner("Searching..."):
+                    research.research_company(conn, company_id, company_name)
+                _commit_and_rerun(conn)
+            except research.ResearchUnavailable as e:
+                st.error(f"Research unavailable right now: {e}")
+    with col2:
+        if st.button(f"Collect financial metrics", key=f"metrics_{role}_{process_id}"):
+            try:
+                with st.spinner("Searching..."):
+                    research.collect_financial_metrics(conn, company_id, industry, company_name)
+                _commit_and_rerun(conn)
+            except research.ResearchUnavailable as e:
+                st.error(f"Metrics unavailable right now: {e}")
+
+    if not grouped:
+        st.caption("No research collected yet for this company.")
+    for category, facts in grouped.items():
+        with st.expander(f"{category.title()} ({len(facts)})"):
+            for f in facts:
+                period = f" ({f['period']})" if f["period"] else ""
+                st.markdown(f"- **{f['label']}**: {f['value']}{period} "
+                           f"<span style='opacity:0.6;font-size:0.8em'>[{f['fact_type']}]</span>",
+                           unsafe_allow_html=True)
+    return company_id
+
+
+def _company_comparison_view(conn, process_id):
+    if st.button("Compare current vs target company", key=f"compare_companies_{process_id}"):
+        rows = research.compare_companies(conn, process_id)
+        conn.commit()
+        st.session_state[f"_comparison_run_{process_id}"] = True
+
+    existing = conn.execute(
+        "SELECT dimension, comparability, current_value, target_value, interpretation "
+        "FROM company_comparison WHERE process_id=? ORDER BY "
+        "CASE comparability WHEN 'comparable' THEN 0 WHEN 'partially_comparable' THEN 1 ELSE 2 END, dimension",
+        (process_id,)).fetchall()
+    if not existing:
+        st.caption("No comparison yet — both companies need research facts collected first, "
+                  "then click Compare above.")
+        return
+    badge = {"comparable": "🟢 Comparable", "partially_comparable": "🟡 Partially comparable",
+             "not_comparable": "⚪ Not comparable"}
+    for r in existing:
+        with st.expander(f"{badge.get(r['comparability'], r['comparability'])} — {r['dimension']}"):
+            st.markdown(f"Current: **{r['current_value']}** · Target: **{r['target_value']}**")
+            st.caption(r["interpretation"])
+
+
+def _role_comparison_view(conn, process_id, master_resume, jd_text):
+    if st.button("Compare current vs target role", key=f"compare_roles_{process_id}"):
+        research.compare_roles(conn, process_id, master_resume, jd_text)
+        conn.commit()
+
+    existing = conn.execute(
+        "SELECT dimension, current_role_text, target_role_text, status, recommendation "
+        "FROM role_comparison WHERE process_id=? ORDER BY dimension", (process_id,)).fetchall()
+    if not existing:
+        st.caption("No role comparison yet — click Compare above (uses your CV and this JD, no research needed).")
+        return
+    status_badge = {"transferable": "✅ Transferable", "gap": "🔶 Gap — worth learning"}
+    for r in existing:
+        with st.expander(f"{status_badge.get(r['status'], r['status'])} — {r['dimension'].replace('_', ' ')}"):
+            st.markdown(f"**From your CV:** {r['current_role_text']}")
+            st.markdown(f"**{r['target_role_text']}**")
+            st.caption(f"Recommendation: {r['recommendation'].replace('_', ' ')}")
+
+
+def _company_research_tab(conn, process_id, master_resume):
+    st.caption("Company/industry facts here have no confirmation gate and no stored source "
+              "(a deliberate choice — see project notes). Treat them as a starting point to "
+              "sanity-check yourself, not a verified ledger like your own resume claims.")
+
+    process_row = conn.execute(
+        "SELECT company_name, role_title, jd_text FROM interview_process WHERE id=?",
+        (process_id,)).fetchone()
+    current_company, current_role = _current_company_role(master_resume)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        _research_company_card(conn, process_id, "current", current_company, "")
+    with col2:
+        _research_company_card(conn, process_id, "target", process_row["company_name"],
+                               process_row["jd_text"])
+
+    st.divider()
+    st.subheader("Company comparison")
+    _company_comparison_view(conn, process_id)
+
+    st.divider()
+    st.subheader("Role comparison")
+    _role_comparison_view(conn, process_id, master_resume, process_row["jd_text"])
 
 
 # ------------------------------------------------------- night-before export
@@ -1060,12 +1154,15 @@ def render():
         # what to do now -> the claims they'll dig into -> the full bank for
         # lookup -> stories -> housekeeping. Fact Review is last because it's
         # a chore, not preparation.
-        tab_plan, tab_claims, tab_bank, tab_stories, tab_facts = st.tabs([
-            "🎯 Prep Plan", "📋 Resume Claims", "🗂️ Question Bank", "📖 Story Bank", fact_tab_label,
+        tab_plan, tab_company, tab_claims, tab_bank, tab_stories, tab_facts = st.tabs([
+            "🎯 Prep Plan", "🏢 Company Research", "📋 Resume Claims", "🗂️ Question Bank",
+            "📖 Story Bank", fact_tab_label,
         ])
 
         with tab_plan:
             _overview_tab(conn, process_id, days_to_interview, master_resume)
+        with tab_company:
+            _company_research_tab(conn, process_id, master_resume)
         with tab_claims:
             _claims_tab(conn, process_id, claims, master_resume)
         with tab_bank:

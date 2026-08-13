@@ -251,6 +251,68 @@ CREATE TABLE IF NOT EXISTS extraction_correction (
     new_value TEXT,
     created_at TEXT NOT NULL
 );
+
+-- ======================================================== Company research
+-- One row per (process, role) -- 'current' and 'target' are scoped to the
+-- process they belong to, per §45 isolation: two processes targeting the
+-- same real-world company each get their own row, so nothing leaks across
+-- projects even when the company name is identical.
+CREATE TABLE IF NOT EXISTS company (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    process_id INTEGER NOT NULL REFERENCES interview_process(id),
+    role TEXT NOT NULL,              -- current | target
+    company_name TEXT NOT NULL,
+    industry TEXT,                   -- banking|nbfc|housing_finance|insurance|saas|ecommerce|... or NULL until classified
+    industry_basis TEXT,             -- fact | inference -- §36: is the industry stated or guessed
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(process_id, role)
+);
+
+-- Per user decision 2026-08-12: no confirmation gate, no stored source URL --
+-- a deliberate departure from I3's candidate-fact discipline, scoped ONLY to
+-- company/industry research (never to candidate claims, which stay I3-gated
+-- via resume_claim/fact_candidate). fact_type still records fact vs
+-- calculated vs estimate vs inference vs hypothesis (§36) so the UI can at
+-- least LABEL confidence even though nothing blocks on it.
+CREATE TABLE IF NOT EXISTS company_fact (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES company(id),
+    category TEXT NOT NULL,          -- corporate|business|strategy|financial|segment|competitor|news|regulatory
+    label TEXT NOT NULL,             -- e.g. "CEO", "AUM", "GNPA"
+    value TEXT NOT NULL,
+    period TEXT,                     -- e.g. "FY2025", "Q1 FY26", or NULL for point-in-time facts
+    fact_type TEXT NOT NULL DEFAULT 'fact',  -- fact|calculated|estimate|inference|hypothesis
+    created_at TEXT NOT NULL
+);
+
+-- §12/13 -- current vs target, one row per compared dimension. comparability
+-- is a first-class field, not an afterthought: §12 explicitly forbids a
+-- forced comparison when industries genuinely differ.
+CREATE TABLE IF NOT EXISTS company_comparison (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    process_id INTEGER NOT NULL REFERENCES interview_process(id),
+    dimension TEXT NOT NULL,
+    comparability TEXT NOT NULL,     -- comparable | partially_comparable | not_comparable
+    current_value TEXT,
+    target_value TEXT,
+    interpretation TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+-- §22 -- current role vs target role. Deterministic: derived entirely from
+-- structured_cv (current role) + jd_requirement (target role), no research
+-- dependency, so this works even while company research is quota-blocked.
+CREATE TABLE IF NOT EXISTS role_comparison (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    process_id INTEGER NOT NULL REFERENCES interview_process(id),
+    dimension TEXT NOT NULL,         -- responsibilities|scope|analytics|leadership|domain|...
+    current_role_text TEXT NOT NULL,
+    target_role_text TEXT NOT NULL,
+    status TEXT NOT NULL,            -- transferable | gap
+    recommendation TEXT NOT NULL,    -- emphasize | reframe | learn | dont_overemphasize
+    created_at TEXT NOT NULL
+);
 """
 
 DEFAULT_COMPETENCIES = [

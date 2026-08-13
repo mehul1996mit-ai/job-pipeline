@@ -226,7 +226,11 @@ def due_followups(conn, today=None):
     """SENT_BY_USER outreach, past its scheduled follow-up date, still
     under the F4 cap. Doesn't send anything — this is what a dashboard/CLI
     surfaces to you to act on."""
-    today = today or datetime.date.today().isoformat()
+    # next_followup_due is stamped from datetime.datetime.utcnow() in
+    # schedule_followup() -- compare against UTC here too, not the OS-local
+    # date, or the due window shifts by up to 5.5h on an IST machine (same
+    # bug class as ratelimit.drafts_created_today()).
+    today = today or datetime.datetime.utcnow().date().isoformat()
     rows = conn.execute(
         "SELECT * FROM outreach WHERE state = 'SENT_BY_USER' "
         "AND next_followup_due IS NOT NULL AND next_followup_due <= ?",
@@ -264,7 +268,7 @@ def _outcome_rows(conn, now=None):
     rather than forcing it onto a binary axis."""
     now = now or datetime.datetime.utcnow()
     rows = conn.execute(
-        "SELECT outreach.*, authority_node.seniority_band AS node_type "
+        "SELECT outreach.*, authority_node.node_type AS node_type "
         "FROM outreach JOIN authority_node ON authority_node.id = outreach.authority_node_id "
         "WHERE outreach.state != 'DRAFTED'"
     ).fetchall()

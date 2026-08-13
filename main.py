@@ -22,6 +22,8 @@ import matcher
 import notify
 import report
 import resume_render
+import scoring_core
+import skill_match
 import tailor as tailor_mod
 import tracker
 from cv_parser import parse_cv, keyword_set
@@ -62,6 +64,17 @@ def main():
     master_resume = json.loads(
         Path("resume_master.json").read_text(encoding="utf-8"))
 
+    # Precomputed ONCE: the CV is constant for the whole run, but
+    # matcher.score_job() is called up to 3x per job listing (initial pass,
+    # Workday full-JD rescore, post-tailoring rescore). Without this, both
+    # scoring layers re-tokenize the same CV text from scratch on every one
+    # of those calls, hundreds to thousands of times a day.
+    cv_index = scoring_core.index_text(cv.raw_text)
+    _skill_sections = structured_cv.get("sections") or {}
+    _skill_cv_text = "\n".join(_skill_sections.get(k, "") for k in _skill_sections)
+    skill_cv_index = skill_match.index_layers(_skill_cv_text)
+    skill_cv_lower = _skill_cv_text.lower()
+
     # --------------------------------------------------------- 2. SEARCH
     log("== 2/4 SEARCH: pulling live listings")
     jobs = []
@@ -93,7 +106,9 @@ def main():
         # title passed separately: seniority inference must read the TITLE's
         # own wording, not stray "senior"/"director" mentions in the body.
         r = matcher.score_job(jd_text, cv.raw_text, structured_cv, config,
-                              title=j.get("title", ""))
+                              title=j.get("title", ""),
+                              cv_index=cv_index, skill_cv_index=skill_cv_index,
+                              skill_cv_lower=skill_cv_lower)
         j.update({
             "score": r["score"],
             "exp_min_years": r["exp_min_years"],
@@ -167,7 +182,9 @@ def main():
             r = matcher.score_job(
                 f"{j['title']} {j.get('description', '')}", cv.raw_text,
                 structured_cv, config, llm_analysis=llm_analysis,
-                title=j.get("title", ""))
+                title=j.get("title", ""),
+                cv_index=cv_index, skill_cv_index=skill_cv_index,
+                skill_cv_lower=skill_cv_lower)
             j.update({
                 "score": r["score"], "percentile": r["percentile"],
                 "exp_min_years": r["exp_min_years"],
