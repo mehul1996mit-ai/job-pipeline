@@ -78,6 +78,13 @@ def send_approved_draft(conn, service, outreach_id, confirmed=False):
 
     sent = service.users().drafts().send(userId="me", body={"id": row["draft_gmail_id"]}).execute()
 
+    # Gmail assigns a NEW message id on send (confirmed live 2026-08-11) —
+    # the row's gmail_message_id still holds the stale draft-time value
+    # until updated here. gmail_thread_id is unaffected (stays stable).
+    if sent.get("id"):
+        conn.execute("UPDATE outreach SET gmail_message_id = ? WHERE id = ?",
+                     (sent["id"], outreach_id))
+
     at = datetime.datetime.utcnow().isoformat()
     a9.update_outreach_state(conn, outreach_id, "SENT_BY_USER",
                               reason="approved_via_review_ui", at=at)

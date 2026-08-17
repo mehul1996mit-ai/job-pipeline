@@ -808,9 +808,13 @@ with store.connect(send_db) as conn:
     check("the fake service actually received exactly one send call with the right draft id",
           len(fake_service.send_calls) == 1
           and fake_service.send_calls[0]["body"]["id"] == draft_result["draft_gmail_id"])
-    row = conn.execute("SELECT state, user_sent_at FROM outreach WHERE id=?", (send_outreach_id,)).fetchone()
+    row = conn.execute("SELECT state, user_sent_at, gmail_message_id FROM outreach WHERE id=?",
+                        (send_outreach_id,)).fetchone()
     check("a successful send transitions the outreach row to SENT_BY_USER via A9's state machine",
           row["state"] == "SENT_BY_USER" and row["user_sent_at"] is not None)
+    check("send_approved_draft updates gmail_message_id to the real post-send id, "
+          "not the stale draft-time one",
+          row["gmail_message_id"] == "fake-sent-message-id")
 
     already_sent_raised = False
     try:
