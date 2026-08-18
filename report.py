@@ -15,6 +15,11 @@ COLUMNS = ["applied", "applied_on", "match_feedback", "score", "title",
            "frozen_score", "legacy_score", "percentile", "band",
            "jd_difficulty", "must_coverage", "missing_must", "top_gaps",
            "score_flags", "sub_scores",
+           # Employer-industry tier (2026-08-18, company_industry.py) — floors
+           # or caps the `domain` sub-score above by employer identity, on
+           # top of the JD-keyword domain bonus. company_basis/evidence make
+           # the classification checkable rather than a silent multiplier.
+           "company_tier", "company_basis", "company_evidence",
            "source", "apply_channel", "salary_min", "salary_max",
            "updated_at", "resume_docx", "resume_pdf",
            "tailored_summary", "bullets_to_lead_with",
@@ -71,6 +76,9 @@ def _row_for(j: dict) -> dict:
                 "sub_scores": json.dumps(
                     {k: round(v, 4) for k, v in
                      (j.get("sub_scores") or {}).items()}, ensure_ascii=False),
+                "company_tier": j.get("company_tier", ""),
+                "company_basis": j.get("company_basis", ""),
+                "company_evidence": j.get("company_evidence", ""),
                 "source": j.get("source", ""),
                 "apply_channel": j.get("apply_channel", ""),
                 "salary_min": j.get("salary_min") or "",

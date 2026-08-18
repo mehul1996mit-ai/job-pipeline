@@ -688,5 +688,116 @@ check("...and does NOT match what the pre-penalty score would calibrate to",
       f"(pre-penalty percentile would have been "
       f"{matcher.calibrate.calibrate_score(_r['score_before_seniority'], _r['analysis'])['percentile']})")
 
+print("\n== 12. EMPLOYER-INDUSTRY TIER (domain sub-score floor/cap)")
+import company_industry as _ci
+
+_NEUTRAL_JD = "Own the roadmap, work with design and engineering daily."
+
+check("allowlist hit -> core tier, evidence names the category",
+      _ci.classify("Navi", "")["tier"] == "core"
+      and _ci.classify("Navi", "")["basis"] == "allowlist",
+      f"({_ci.classify('Navi', '')})")
+
+check("allowlist hit is case/punctuation insensitive",
+      _ci.classify("razorpay", "")["basis"] == "allowlist",
+      f"({_ci.classify('razorpay', '')})")
+
+check("services-tier company name -> capped, negative_list basis",
+      _ci.classify("Infosys BPM", "")["tier"] == "services"
+      and _ci.classify("Infosys BPM", "")["basis"] == "negative_list")
+
+check("'our client, a leading NBFC' (staffing JD) -> services, not core",
+      _ci.classify("Randstad India",
+                   "Our client, a leading NBFC, is hiring")["tier"]
+      == "services")
+
+check("JD self-description ('we are a fintech...') -> adjacent, unlisted company",
+      _ci.classify("Totally Unlisted Startup Pvt Ltd",
+                   "We are a fintech building credit products for India."
+                   )["tier"] == "adjacent")
+
+check("bare company name never matched on keyword unless source is direct-ATS",
+      _ci.classify("Bluewave Capital Technologies", "", source="adzuna")["tier"]
+      == "unknown",
+      "(aggregator-reported names are not a verified employer identity)")
+
+check("same name-keyword match DOES fire for a direct-ATS source",
+      _ci.classify("Bluewave Capital Technologies", "", source="greenhouse")["tier"]
+      == "adjacent")
+
+check("unmatched company -> unknown, no evidence fabricated",
+      _ci.classify("Some Random Widget Co", "") == {
+          "tier": "unknown", "basis": "unknown", "evidence": ""})
+
+# --- floor/cap actually changes the domain sub-score, and only that -------
+check("apply_domain_floor_cap: core floors a low domain score up",
+      _ci.apply_domain_floor_cap(0.1, "core") == 1.0)
+check("apply_domain_floor_cap: services caps a high domain score down",
+      _ci.apply_domain_floor_cap(0.9, "services") == 0.3)
+check("apply_domain_floor_cap: unknown is a no-op",
+      _ci.apply_domain_floor_cap(0.37, "unknown") == 0.37)
+check("apply_domain_floor_cap: adjacent never lowers an already-high score",
+      _ci.apply_domain_floor_cap(0.95, "adjacent") == 0.95)
+
+# --- end-to-end via score_job: unknown company must be byte-identical -----
+_r_baseline = matcher.score_job(_NEUTRAL_JD, cv.raw_text, scv, config,
+                                title="Product Manager")
+_r_unknown = matcher.score_job(_NEUTRAL_JD, cv.raw_text, scv, config,
+                               title="Product Manager",
+                               company="Some Random Widget Co", source="adzuna")
+check("an unclassified company changes NOTHING vs. no company at all",
+      _r_unknown["score"] == _r_baseline["score"]
+      and _r_unknown["sub_scores"] == _r_baseline["sub_scores"],
+      f"({_r_baseline['score']} vs {_r_unknown['score']})")
+
+# --- a core-tier employer outscores an unknown one on an identical,
+#     domain-keyword-free JD -- this is the actual feature working ---------
+_r_core = matcher.score_job(_NEUTRAL_JD, cv.raw_text, scv, config,
+                            title="Product Manager", company="Navi")
+check("core-tier employer scores strictly higher than unknown on the same "
+      "domain-keyword-free JD",
+      _r_core["score"] > _r_unknown["score"],
+      f"(core {_r_core['score']} vs unknown {_r_unknown['score']})")
+check("company_tier/basis/evidence are reported on the row, not hidden",
+      _r_core["company_tier"] == "core" and _r_core["company_basis"] == "allowlist")
+
+# --- services-tier is a CAP, never a filter: still nonzero, still scored --
+# Deliberately no "our client"-style phrase here -- that's covered above by
+# the classify() unit checks; this JD text alone must be tier-neutral so the
+# ONLY variable between the two calls below is the employer name/tier.
+_DOMAIN_DENSE_JD = ("Own credit and lending product decisions across "
+                    "digital banking, fintech and BFSI credit risk "
+                    "initiatives, working with NBFC partners.")
+_r_services = matcher.score_job(_DOMAIN_DENSE_JD, cv.raw_text, scv, config,
+                                title="Product Manager", company="Infosys BPM")
+_r_services_unknown = matcher.score_job(
+    _DOMAIN_DENSE_JD, cv.raw_text, scv, config,
+    title="Product Manager", company="Some Random Widget Co")
+check("a domain-keyword-dense JD scores LOWER at a services employer than "
+      "the identical text would at an unclassified one",
+      _r_services["sub_scores"]["domain"] < _r_services_unknown["sub_scores"]["domain"],
+      f"(services domain {_r_services['sub_scores']['domain']:.2f} vs "
+      f"unknown {_r_services_unknown['sub_scores']['domain']:.2f})")
+check("...but the cap never zeroes it out -- still a real, nonzero score",
+      _r_services["score"] > 0)
+
+check("classify() needs no network/LLM call (pure function over local yaml)",
+      isinstance(_ci.classify("Navi", "We are a fintech."), dict))
+
+# Real bug found by measuring against the 2026-08-13..17 queues: "Capco" (a
+# real BFSI consultancy, not a staffing agency) was capped to services 6
+# times because its JD mentioned "Wipro" as a delivery partner/vendor, not
+# because Capco's OWN name/identity says staffing. A brand-name keyword must
+# only ever match the company field, never free JD text -- a legitimate
+# core-tier employer could just as easily name-drop a vendor.
+check("a vendor/competitor NAME mentioned in JD body does not cap an "
+      "otherwise-unmatched employer",
+      _ci.classify("Capco", "We partner with delivery vendors including "
+                            "Wipro on select engagements.")["tier"]
+      != "services",
+      f"({_ci.classify('Capco', 'We partner with delivery vendors including Wipro on select engagements.')})")
+check("...but the company's OWN name still matches a brand keyword normally",
+      _ci.classify("Wipro Limited", "")["tier"] == "services")
+
 print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
 sys.exit(1 if failures else 0)

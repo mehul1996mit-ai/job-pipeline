@@ -108,9 +108,14 @@ def main():
         r = matcher.score_job(jd_text, cv.raw_text, structured_cv, config,
                               title=j.get("title", ""),
                               cv_index=cv_index, skill_cv_index=skill_cv_index,
-                              skill_cv_lower=skill_cv_lower)
+                              skill_cv_lower=skill_cv_lower,
+                              company=j.get("company", ""),
+                              source=j.get("source", ""))
         j.update({
             "score": r["score"],
+            "company_tier": r["company_tier"],
+            "company_basis": r["company_basis"],
+            "company_evidence": r["company_evidence"],
             "exp_min_years": r["exp_min_years"],
             "exp_max_years": r["exp_max_years"],
             "exp_confidence": r["exp_confidence"],
@@ -184,9 +189,13 @@ def main():
                 structured_cv, config, llm_analysis=llm_analysis,
                 title=j.get("title", ""),
                 cv_index=cv_index, skill_cv_index=skill_cv_index,
-                skill_cv_lower=skill_cv_lower)
+                skill_cv_lower=skill_cv_lower,
+                company=j.get("company", ""), source=j.get("source", ""))
             j.update({
                 "score": r["score"], "percentile": r["percentile"],
+                "company_tier": r["company_tier"],
+                "company_basis": r["company_basis"],
+                "company_evidence": r["company_evidence"],
                 "exp_min_years": r["exp_min_years"],
                 "exp_max_years": r["exp_max_years"],
                 "exp_confidence": r["exp_confidence"],

@@ -29,6 +29,7 @@ import re
 from collections import Counter
 
 import calibrate
+import company_industry
 import jd_analyst
 import seniority
 from aggregate import aggregate_score
@@ -201,7 +202,8 @@ def _experience_verdict(title: str, jd_text: str, config: dict) -> dict:
 def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
               llm_analysis: dict | None = None, title: str = "",
               cv_index: dict | None = None, skill_cv_index: dict | None = None,
-              skill_cv_lower: str | None = None) -> dict:
+              skill_cv_lower: str | None = None, company: str = "",
+              source: str = "") -> dict:
     """Score one posting through every layer. Fully deterministic unless an
     `llm_analysis` is supplied (from the tailoring call, which already happens
     for the top-N jobs) — so this is safe to run on every listing.
@@ -215,6 +217,13 @@ def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
     hundreds/thousands of times a day. Optional: falls back to recomputing
     when not supplied, so existing callers are unaffected.
 
+    `company`/`source`: optional employer identity (see company_industry.py,
+    2026-08-18) — floors/caps the `domain` sub-score by employer industry
+    tier (fintech/NBFC core vs. IT-services cap), on top of the existing
+    JD-keyword domain bonus. Both optional: an unclassified/blank company is
+    "unknown", which applies no floor and no cap — identical to scoring
+    before this feature existed.
+
     Returns a flat dict suitable for stashing on the job record and writing to
     the CSV, plus the nested structures the dashboard can expand.
     """
@@ -226,11 +235,14 @@ def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
     sm = structured_skill_match(analysis, structured_cv,
                                 cv_index=skill_cv_index, cv_lower=skill_cv_lower)
 
+    company_verdict = company_industry.classify(company, jd_text, source)
+
     agg_kwargs = {
         "jd_text": jd_text,
         "cv_text": cv_text,
         "domain_keywords": _domain_keywords(config),
         "weights": config.get("scoring", {}).get("weights") or None,
+        "company_tier": company_verdict["tier"],
     }
     agg = aggregate_score(analysis, structured_cv, sm, **agg_kwargs)
     gaps = calibrate.counterfactual_gaps(analysis, structured_cv, sm,
@@ -261,6 +273,9 @@ def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
     return {
         "score": score,                        # structured — rank on this
         "score_before_seniority": agg["score"],
+        "company_tier": company_verdict["tier"],
+        "company_basis": company_verdict["basis"],
+        "company_evidence": company_verdict["evidence"],
         **exp,
         "frozen_score": frozen["score"],
         "percentile": cal.get("percentile"),

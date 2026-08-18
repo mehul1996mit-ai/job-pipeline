@@ -1,0 +1,99 @@
+# industry_map.yaml
+#
+# Maps company identity -> an industry TIER for scoring (see company_industry.py).
+# Tiers are relative to the candidate's own domain (digital lending / NBFC,
+# see config.yaml profile), not an absolute industry ranking.
+#
+#   core       — same sub-sector as the candidate's current domain. Domain
+#                sub-score floor 1.0 (full credit even if the JD prose itself
+#                never uses a domain keyword).
+#   adjacent   — broader fintech/BFSI. Floor 0.7.
+#   services   — IT services / staffing / consulting. These CAP the domain
+#                sub-score at 0.3 rather than floor it — a JD that happens to
+#                be domain-keyword-dense ("our client, a leading NBFC...")
+#                must not earn the bonus meant for the employer's own domain.
+#   (unmatched company -> "unknown": no floor, no cap, behaves exactly as
+#   before this feature existed.)
+#
+# category_tiers keys must match policy/company_allowlist.yaml's category
+# names exactly — that file is reused as the company->category source rather
+# than duplicating a company list here.
+category_tiers:
+  lending_fintechs_digital_credit: core
+  large_nbfcs: core
+  housing_finance_companies: core
+  specialized_msme_finance: core
+  emerging_fintechs_financial_platforms: core
+  payments_merchant_solutions: adjacent
+  neobanks_banking_platforms: adjacent
+  fintech_infrastructure_api_saas: adjacent
+  wealthtech_investment: adjacent
+  insurtech: adjacent
+
+# Used only when the company isn't on the allowlist. Matched against the
+# JD's own first-person self-description sentences ("we are India's leading
+# NBFC...", "our lending platform...") — NOT the whole JD body, so a staffing
+# JD that merely mentions a client's industry doesn't trigger this.
+adjacent_self_description_keywords:
+  - nbfc
+  - fintech
+  - digital lending
+  - digital bank
+  - neobank
+  - payments platform
+  - lending platform
+  - credit platform
+  - insurtech
+  - wealthtech
+
+# Weak fallback: company NAME itself contains one of these, and the company
+# came from a source where the name is a verified employer identity (a
+# Greenhouse/Lever/Workday/SmartRecruiters/Ashby token), not a scraped
+# aggregator string that might actually be a staffing agency's name.
+adjacent_name_keywords:
+  - bank
+  - finance
+  - capital
+  - credit
+  - lending
+  - insurance
+  - nbfc
+
+# IT-services/staffing BRAND NAMES -> "services" tier (cap, never floor).
+# Matched ONLY against the employer's own company-name field, never against
+# free JD text. Found live (2026-08-18 measurement against real 08-13..17
+# queues): matching these against the whole JD body caught real BFSI
+# consultancies (Capco, 6 real rows) via an incidental vendor/competitor
+# mention ("...delivery partners including Wipro...") rather than the
+# employer's own identity -- Capco is not a staffing agency, it just
+# mentioned one. A legitimate core-tier NBFC could just as easily name-drop
+# a tech vendor and get wrongly capped the same way. Extend only on a
+# confirmed company-NAME false-positive.
+services_name_keywords:
+  - infosys
+  - tcs
+  - tata consultancy
+  - wipro
+  - accenture
+  - cognizant
+  - capgemini
+  - hcl
+  - tech mahindra
+  - randstad
+  - team lease
+  - teamlease
+  - quess corp
+  - adecco
+  - manpower
+
+# Genuine staffing-TELL phrases -- safe to match anywhere in the JD body
+# (unlike the brand names above) because these phrases describe the
+# LISTING's own relationship to the role, not a stray mention of someone
+# else's name: "our client" only ever appears in a staffing/consulting JD
+# describing a role at a DIFFERENT company, never in an employer's own
+# posting about itself.
+services_jd_phrases:
+  - "our client"
+  - "a leading it services"
+  - "staffing solutions"
+  - "recruitment consultancy"

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 
+import company_industry
 from scoring_core import compute_match, js_round
 
 # Tunable per role-family via the `weights` argument.
@@ -134,7 +135,7 @@ def trajectory_score(experience: list[dict]) -> float:
 
 def aggregate_score(jd: dict, parsed_cv: dict, sm: dict, weights=None,
                     domain_score=None, jd_text=None, cv_text=None,
-                    domain_keywords=None) -> dict:
+                    domain_keywords=None, company_tier=None) -> dict:
     """Blend the sub-scores into a structured 0-100 score with penalties,
     eligibility gates and flags — every component reported, never opaque."""
     jd = jd or {}
@@ -151,6 +152,16 @@ def aggregate_score(jd: dict, parsed_cv: dict, sm: dict, weights=None,
             domain_score = clamp(mm["bonus"] / 20, 0, 1)
         else:
             domain_score = 0
+
+    # Employer-identity floor/cap (2026-08-18, see company_industry.py). The
+    # JD-prose bonus above only catches domain KEYWORDS in the posting text;
+    # it misses a genuinely core-domain employer whose JD never happens to
+    # say "fintech", and it over-credits a staffing JD that quotes a client's
+    # industry. `company_tier=None`/"unknown" is a no-op — identical to
+    # pre-feature scoring for every company not classified.
+    if company_tier:
+        domain_score = company_industry.apply_domain_floor_cap(
+            domain_score, company_tier)
 
     sub = {
         "skill_match": clamp(sm.get("skill_score") or 0, 0, 1),
