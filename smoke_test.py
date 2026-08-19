@@ -131,8 +131,10 @@ fake_tailored = {
     "tailored_summary": "Reworded summary for this job.",
     "bullets_to_lead_with": [
         # slightly paraphrased vs the real bullet -- fuzzy match must find it
-        "Used Google Analytics and CleverTap to drive data-informed decisions",
-        "Managed Instagram and Facebook Ads campaigns to cut cost-per-click",
+        "Lifted conversion and user acquisition by instrumenting the journey "
+        "in Google Analytics and CleverTap",
+        "Ran paid acquisition restructuring Meta Facebook and Instagram "
+        "campaigns to cut cost-per-click and improve return on ad spend",
     ],
     "keywords_to_add_if_true": ["seo", "facebook ads"],
     "honest_gap_note": "test",
@@ -142,16 +144,18 @@ check("summary replaced", tailored_resume["summary"] == fake_tailored["tailored_
 check("name locked", tailored_resume["name"] == master["name"])
 check("contact locked", tailored_resume["contact_line"] == master["contact_line"])
 
-pl_role = tailored_resume["experience"][0]["roles"][1]  # Digital Platforms role
+pl_role = tailored_resume["experience"][0]["roles"][1]  # Personal Loans role
 check("lead bullet moved to front (Bajaj role)",
       "Google Analytics and CleverTap" in pl_role["bullets"][0])
 kantha_role = tailored_resume["experience"][1]["roles"][0]
 check("lead bullet moved to front (Kantha role)",
-      "Instagram Ads and Facebook Ads" in kantha_role["bullets"][0])
+      "Meta (Facebook and Instagram)" in kantha_role["bullets"][0])
 check("no bullet text was fabricated (matched bullet is verbatim original)",
       pl_role["bullets"][0] ==
-      "Used Google Analytics and CleverTap to track user behaviour and KPIs, "
-      "driving data-informed decisions that lifted conversion rates 23%.")
+      "Lifted conversion 23% and user acquisition 14% by instrumenting "
+      "the journey in Google Analytics and CleverTap, isolating the "
+      "cohorts that dropped, and sequencing fixes by revenue impact "
+      "rather than ticket count.")
 check("skills reordered toward matched keywords",
       "seo" in tailored_resume["skills"][0]["items"].lower()
       or "facebook" in tailored_resume["skills"][0]["items"].lower())
@@ -171,37 +175,41 @@ same_role_fields = {
     # paraphrased), so realistic candidates are near-exact copies of the
     # source bullet -- that's what we test the priority-order fix against.
     "bullets_to_lead_with": [
-        # both match bullets inside Bajaj's "Home Loan" role, in this order
-        "Own product strategy for Home Loan digital acquisition, "
-        "translating business and credit-policy requirements into "
-        "scalable lead-generation and qualification systems.",
-        "Design and ship the MCP (Minimum Credit Parameters) Master and "
-        "Lead Allocation Master -- a rules engine that pre-qualifies "
-        "leads and routes them to the right lending partner based on "
-        "credit profile, eligibility, and business rules.",
+        # both match bullets inside Bajaj's "Home Loans" role, in this order
+        "Own the business side of digital acquisition for the mortgage "
+        "portfolio (Home Loans, LAP, Balance Transfer, Top-up), carrying "
+        "the disbursal number for an online channel at ~Rs.100 Cr/month.",
+        "Designed and shipped the MCP (Minimum Credit Parameters) Master "
+        "and Lead Allocation Master -- a two-sided matching engine that "
+        "scores leads against each partner's credit criteria and routes "
+        "every lead to its best-fit lender.",
     ],
     "keywords_to_add_if_true": [],
 }
 same_role_resume = tailor.build_tailored_resume(master, same_role_fields)
 hl_role = same_role_resume["experience"][0]["roles"][0]
 check("same-role priority order preserved (1st listed lead bullet is 1st)",
-      hl_role["bullets"][0].startswith("Own product strategy"),
+      hl_role["bullets"][0].startswith("Own the business side"),
       f"(got: \"{hl_role['bullets'][0][:60]}...\")")
 check("same-role 2nd priority in 2nd position",
-      hl_role["bullets"][1].startswith("Design and ship the MCP"),
+      hl_role["bullets"][1].startswith("Designed and shipped the MCP"),
       f"(got: \"{hl_role['bullets'][1][:60]}...\")")
 
 print("\n== 6. JD-ALIGNED REWORDING (fact-integrity validation)")
-orig = ("Led development and management of digital platforms (app and web) "
-        "for the Personal Loan product, growing user engagement 27% and "
-        "user acquisition 14%.")
-good_rw = ("Led digital product management for Personal Loan platforms "
-           "(app and web), driving client activation and engagement growth "
-           "of 27% and user acquisition of 14%.")
-bad_rw_newnum = orig.replace("27%", "45%")
+orig = ("Lifted conversion 23% and user acquisition 14% by instrumenting "
+        "the journey in Google Analytics and CleverTap, isolating the "
+        "cohorts that dropped, and sequencing fixes by revenue impact "
+        "rather than ticket count.")
+good_rw = ("Drove a 23% lift in conversion and 14% growth in user "
+           "acquisition by instrumenting the journey in Google Analytics "
+           "and CleverTap, isolating drop-off cohorts and sequencing "
+           "fixes by revenue impact rather than ticket count.")
+bad_rw_newnum = orig.replace("23%", "45%")
 bad_rw_addclaim = orig + (" Also owned Wholesale Banking activation "
                           "strategy across payments and liquidity journeys "
-                          "for institutional clients worldwide, and more.")
+                          "for institutional clients worldwide, coordinating "
+                          "with Treasury, Compliance, and regional desks on "
+                          "cross-border settlement workflows, and more.")
 check("valid rewording accepted (same numbers, JD vocabulary)",
       tailor.rewrite_is_safe(orig, good_rw))
 check("rewrite changing a metric REJECTED",
@@ -230,7 +238,7 @@ check("original wording replaced (not duplicated)",
       not any(b == orig for b in pl_bullets)
       and sum(1 for b in pl_bullets if b == good_rw) == 1)
 analytics_group = next(g for g in rw_resume["skills"]
-                       if g["label"] == "Analytics & Tools")
+                       if g["label"] == "Data & Tools")
 first_items = [s.strip() for s in
                analytics_group["items"].split(",")][:3]
 check("skill ITEMS reordered toward JD mentions",

@@ -44,7 +44,7 @@ with interview_store.connect() as conn:
         conn, "TestCo", "PM", "We need product management experience.", "pasted")
 
 claims = interview_prep.extract_claims(MASTER_RESUME, [])
-CLAIM = dict(next(c for c in claims if "27%" in c["claim_text"]))
+CLAIM = dict(next(c for c in claims if "Lifted conversion 23%" in c["claim_text"]))
 with interview_store.connect() as conn:
     CLAIM["id"] = interview_prep.insert_claims(conn, [CLAIM])[0]
 
@@ -129,8 +129,9 @@ with interview_store.connect() as conn:
 print("\n== §4 batch generation — fake call_fn double, I3-checked")
 
 GOOD_ANSWER = json.dumps({
-    "answer_text": "I led the Personal Loan platform redesign, growing user engagement 27% "
-                   "and acquisition 14% [YOU FILL: specific technical steps].",
+    "answer_text": "I led the Personal Loan platform's conversion work, lifting "
+                   "conversion 23% and user acquisition 14% [YOU FILL: specific "
+                   "technical steps].",
     "gaps": ["specific technical steps"],
 })
 BAD_ANSWER = json.dumps({"answer_text": "We hit a massive 92% improvement.", "gaps": []})
@@ -176,7 +177,7 @@ with interview_store.connect() as conn:
 
 print("\n== §6 fact detection / confirmation / conflict resolution (E4, E5)")
 sample_answer = ("I owned this end to end. The baseline was 12% before I started, and I "
-                 "grew it to 27% over 6 months with a team of 4 engineers.")
+                 "grew it to 23% over 6 months with a team of 4 engineers.")
 facts = interview_answers.extract_fact_candidates(sample_answer, claim_ref=CLAIM["id"])
 types_found = {f["fact_type"] for f in facts}
 check("fact detector distinguishes baseline/metric/timeframe/team_size in one answer",
@@ -189,8 +190,8 @@ with interview_store.connect() as conn:
           all(conn.execute("SELECT provenance FROM fact_candidate WHERE id=?", (i,)).fetchone()["provenance"]
               == "candidate_asserted" for i in fc_ids))
 
-    # Pick a fact candidate whose value (27) does NOT conflict with the claim's own
-    # metric_value (27) -- should confirm straight through.
+    # Pick a fact candidate whose value (23) does NOT conflict with the claim's own
+    # metric_value (23) -- should confirm straight through.
     non_conflicting = next(i for i in fc_ids if
                            conn.execute("SELECT value FROM fact_candidate WHERE id=?", (i,)).fetchone()["value"]
                            == CLAIM["metric_value"])

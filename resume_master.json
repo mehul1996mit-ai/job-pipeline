@@ -1,70 +1,66 @@
 {
   "name": "MEHUL AGARWAL",
-  "contact_line": "Pune, MH/IN | +91 9591924902 | mehul.a23@mibdu.org | linkedin.com/in/mehulagarwal05/",
-  "summary": "Product Manager with 4+ years building digital lending products in fintech, currently owning the Home Loan digital acquisition stack at Bajaj Finance -- from credit eligibility rules to lead allocation and lending-partner integrations. Operates across both strategic and tactical layers of the role: shaping roadmap and partnership strategy with Business and Credit Policy teams, while running sprint planning, backlog grooming, and specs with Engineering and Design. Previously owned the Personal Loan digital platform end-to-end, from requirements through post-launch iteration. Grounded in data -- uses Google Analytics, CleverTap, and Looker Studio to validate decisions and prioritize the roadmap.",
+  "contact_line": "Pune, MH, India | +91 95919 24902 | mehul.a23@mibdu.org | linkedin.com/in/mehulagarwal05",
+  "summary": "Product manager who builds the systems that connect demand to supply, and now owns the business outcome they produce. 4+ years across digital product, growth, and partnerships -- 3+ of them in consumer lending at Bajaj Finance, India's largest retail NBFC. Started on the platform side, owning the Personal Loan application journey through the channel's scale-up from ~₹400 Cr to ~₹1,100 Cr in monthly disbursals. Now on the business side of the mortgage portfolio, carrying the ~₹100 Cr/month disbursal number against a ~₹1,500 Cr annual mandate and running a matching engine that qualifies ~90,000 leads/month against credit criteria and routes them across a 9-partner network. Work where product, commercial, and partnerships meet, with a ~20-member cross-functional pod across 10 functions.",
   "skills": [
     {
       "label": "Product & Delivery",
-      "items": "Product Management, Product Road-mapping, BRDs, SDLC, Agile/Scrum, Stakeholder Management, Release Management, Gap Analysis, UX Design (Figma)"
+      "items": "Product Management, Product Lifecycle Management, Product Strategy, Roadmapping, Requirement Gathering, BRDs/PRDs, Agile/Scrum, UX Design (Figma)"
     },
     {
-      "label": "Analytics & Tools",
-      "items": "Google Analytics, CleverTap, Looker Studio, New Relic, A/B Testing, MS-Excel, Azure DevOps, Salesforce"
+      "label": "Business, Growth & Partnerships",
+      "items": "Strategic Partnerships & Alliances, Funnel & Conversion Optimisation, Stakeholder Management, Customer Journey Mapping, Go-to-Market Strategy, Process Automation, Team Leadership"
     },
     {
-      "label": "Domain & Growth",
-      "items": "Digital Lending, Fintech, B2C, Performance Marketing, SEO, Facebook/Google Ads, Lead Funnel Optimisation, MCP Frameworks, Lead Allocation Engines, Partner Integrations"
+      "label": "Domain -- Lending & Credit",
+      "items": "Digital Lending, NBFC/FinTech, Business Rules Engines (BRE), Lead Allocation & Distribution, Lending-Partner Integrations, Straight-Through Processing"
+    },
+    {
+      "label": "Data & Tools",
+      "items": "SQL, Google Analytics, CleverTap, Looker Studio, A/B Testing, MS Excel, Azure DevOps, Google/Meta Ads, SEO"
     }
   ],
   "experience": [
     {
-      "company": "Bajaj Finance",
+      "company": "Bajaj Finance Ltd.",
       "dates": "Jun 2023 - Present",
       "roles": [
         {
-          "title": "Product Manager - Home Loan: Digital Platforms and Consumer AI",
+          "title": "Product Manager - Home Loans: Digital Growth & Lending Partnerships",
           "dates": "Dec 2025 - Present",
           "bullets": [
-            "Own product strategy for Home Loan digital acquisition, translating business and credit-policy requirements into scalable lead-generation and qualification systems.",
-            "Define requirements and drive execution of digital campaign infrastructure across search, social, and paid channels to generate high-quality home loan demand.",
-            "Lead product requirements for strategic NBFC and financial-institution partnerships, designing lead-exchange and commission workflows with legal, business, and tech teams.",
-            "Design and ship the MCP (Minimum Credit Parameters) Master and Lead Allocation Master -- a rules engine that pre-qualifies leads and routes them to the right lending partner based on credit profile, eligibility, and business rules.",
-            "Map and optimize the end-to-end digital home loan funnel -- from awareness and lead generation through login, sanction, and disbursal -- identifying drop-off points and prioritizing fixes."
+            "Own the business side of digital acquisition for the mortgage portfolio (Home Loans, LAP, Balance Transfer, Top-up), carrying the disbursal number for an online channel at ~₹100 Cr/month (~₹1,200 Cr annualised), up from ~₹80 Cr, against a full-year mandate of ~₹1,500 Cr.",
+            "Designed and shipped the MCP (Minimum Credit Parameters) Master and Lead Allocation Master -- a two-sided matching engine that scores ~90,000 leads/month against each partner's credit criteria and routes every lead to its best-fit lender, lifting lead-to-login conversion 40% and lead-to-disbursal from 0.5% to 0.7% at a ~40% approval rate and 50% match rate.",
+            "Grew the live partner network from 4 to 6 lenders (2 more in build), negotiating lead-exchange and commission economics with Legal, Business, and Technology so a single customer can be matched against multiple partners' criteria and monetised through distribution.",
+            "Made the call to optimise for qualified demand over raw lead volume, accepting lower lead counts -- feeding qualification outcomes back into campaign targeting to cut cost per lead 33%, from ~₹1,350 to ~₹900.",
+            "Built a lead-reassignment model that re-routes customers declined by their first partner to the next-best match on the priority list, recovering demand that would otherwise be lost and raising overall utilisation of every lead acquired.",
+            "Part of a ~20-member cross-functional pod (product, engineering, growth, CX, analytics) with 2 direct reports, aligning 10 functions -- Business, Sales, Call Centre, Credit Policy, Risk, Legal, Compliance, IT, CX, and Marketing.",
+            "Define the capability roadmap and requirements for the channel as its business owner -- translating the disbursal target into product, policy, and partner asks for Technology, Credit, and Legal to build against."
           ],
           "projects": [
             {
-              "name": "Lead Quality & Allocation Optimization (MCP + Allocation Engine)",
-              "desc": "Implemented MCP-based lead pre-qualification and built a rule-driven allocation engine to route leads to relevant partners, improving lead quality, partner match, and overall conversion efficiency, while optimizing acquisition ROI."
-            },
-            {
               "name": "Next Best Product Engine (In Progress)",
-              "desc": "Building a framework to recommend alternate loan products when customers fail primary product MCP checks. Evaluates eligibility across related products and uses a propensity model to show the top 3 relevant offers within the same journey."
+              "desc": "Building a cross-sell framework that checks eligibility across adjacent products when a customer fails the primary product's criteria, using a propensity model to surface the top 3 relevant offers inside the same journey -- converting declined applicants into retained demand instead of lost traffic."
             }
           ]
         },
         {
-          "title": "Product Manager: Digital Platforms",
+          "title": "Product Manager - Personal Loans: Digital Platform",
           "dates": "Jun 2023 - Nov 2025",
           "bullets": [
-            "Led development and management of digital platforms (app and web) for the Personal Loan product, growing user engagement 27% and user acquisition 14%.",
-            "Served as primary liaison between technical and business stakeholders, driving alignment on requirements and project status throughout the delivery lifecycle.",
-            "Wrote detailed product specifications and requirements in partnership with engineering teams to ensure aligned, on-time delivery.",
-            "Owned end-to-end delivery -- from concept and design through development, testing, deployment, and post-launch support -- ensuring seamless product releases.",
-            "Used Google Analytics and CleverTap to track user behaviour and KPIs, driving data-informed decisions that lifted conversion rates 23%.",
-            "Partnered with UI/UX designers to streamline the application experience, cutting user drop-off rates 40%."
+            "Owned the Personal Loan digital platform (app and web) at ~15 lakh Form-1 submissions/month, turning business and credit requirements into shipped capability while the channel scaled from ~₹400 Cr to ~₹1,100 Cr in monthly disbursals through a period of sector-wide tightening in consumer credit.",
+            "Rebuilt the application journey with UI/UX -- cutting drop-off 40% and completion time 15%, lifting completed applications 30% and automating 22% more of the journey end-to-end through straight-through processing.",
+            "Lifted conversion 23% and user acquisition 14% by instrumenting the journey in Google Analytics and CleverTap, isolating the cohorts that dropped, and sequencing fixes by revenue impact rather than ticket count.",
+            "Ran the full product lifecycle for platform releases -- requirement intake, PRDs, design, build, QA, deployment, and post-launch iteration -- as the primary interface between business stakeholders and Engineering on scope, trade-offs, and release status."
           ],
           "projects": [
             {
-              "name": "Personal Loan Platform Enhancement",
-              "desc": "Spearheaded the complete redesign of the personal loan application process on both app and web platforms, resulting in a 15% reduction in application completion time and a 30% increase in completed applications."
+              "name": "GYDE AI Voice Assist",
+              "desc": "Shipped conversational voice assistance inside the application form to guide applicants through completion, lifting Form-1 submissions ~3.5% -- roughly 50,000 additional submissions per month at platform scale."
             },
             {
-              "name": "GYDE AI Voice Assist - Funnel Optimisation",
-              "desc": "Led end-to-end implementation of AI-driven voice assist within PL forms to guide users and reduce drop-offs, leading to a ~3.5% increase in PL Form-1 submissions."
-            },
-            {
-              "name": "Microfinance Loan: Digital Lead Creation",
-              "desc": "Successfully designed, developed, and launched a streamlined lead creation process for a new product -- Microfinance group loan -- on App and Web platforms, aimed at improving user engagement and increasing lead conversion rates."
+              "name": "Microfinance Loans -- 0 to 1 Digital Journey",
+              "desc": "Launched digital lead creation for Microfinance group loans on app and web from scratch, generating ~2,000 leads/month and opening an underserved customer segment to digital origination."
             }
           ]
         }
@@ -78,9 +74,8 @@
           "title": "Digital Marketing Associate",
           "dates": "",
           "bullets": [
-            "Managed Instagram Ads and Facebook Ads campaigns, optimizing ad copy and targeting to reduce cost-per-click by 58% and increase ROI by 35%.",
-            "Raised the website's SEO score from 34 to 71 through on-page and off-page optimization and keyword research, driving a 40% increase in organic search traffic.",
-            "Developed content calendars and collaborated with designers to create visually appealing and brand-aligned posts, leading to a 15% increase in click-through rates."
+            "Ran paid acquisition end-to-end -- restructuring Meta (Facebook and Instagram) campaigns across copy, targeting, and budget allocation to cut cost-per-click 58% and improve return on ad spend 35%.",
+            "Raised the website's SEO score from 34 to 51 through on-page and off-page optimisation, driving a 22% increase in organic traffic, and built content calendars with design partners that lifted click-through rates 15%."
           ],
           "projects": []
         }
@@ -94,9 +89,8 @@
           "title": "Product Marketing Intern",
           "dates": "",
           "bullets": [
-            "Performed in-depth market research for HOC's cloud kitchen operations; developed competitive pricing strategies and identified prime locations with high revenue potential.",
-            "Developed the Go-to-Market strategy for HOC sauces; led the pre-launch marketing campaign, including ad creatives, landing page design, and budget allocation.",
-            "Finalized the user interface and content for the HOC website; implemented SEO best practices, including keyword optimization and internal linking, to enhance search engine visibility."
+            "Built the go-to-market strategy for a packaged-foods launch and ran the pre-launch campaign across creatives, landing page, and budget allocation.",
+            "Ran market research and competitive pricing analysis for the client's cloud-kitchen operations, identifying the locations with highest revenue potential."
           ],
           "projects": []
         }
@@ -104,14 +98,14 @@
     }
   ],
   "achievements": [
-    "Spotlight Award, Bajaj Finance -- Recognised for on-time delivery of the Microfinance Loan Digital Lead Creation project, which drove measurable improvements in lead conversion.",
-    "National Winner - Lakshwiz Bazar 2021 -- Ranked 1st among 460+ teams in the National Marketing Management Case Challenge by NITIE, Mumbai.",
-    "National Finalist - The Perfect Candidate -- Top finalist out of 576 participants in the National General Management Competition by NMIMS, Mumbai."
+    "Spotlight Award, Bajaj Finance -- Recognised for on-time delivery of the Microfinance digital launch and its lift in lead conversion.",
+    "National Winner, Lakshwiz Bazar 2021 -- Ranked 1st of 460+ teams, National Marketing Management Case Challenge, NITIE Mumbai.",
+    "National Finalist, The Perfect Candidate -- Top finalist of 576 participants, National General Management Competition, NMIMS Mumbai."
   ],
   "education": [
     {
       "school": "Delhi School of Economics",
-      "degree": "Master of Business Administration (MBA) | Marketing & Strategy",
+      "degree": "MBA (International Business)",
       "dates": "2021 - 2023"
     },
     {

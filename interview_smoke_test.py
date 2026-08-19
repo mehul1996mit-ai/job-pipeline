@@ -83,16 +83,17 @@ claims = interview_prep.extract_claims(
     MASTER_RESUME, STRUCTURED_CV["skills"]["declared"])
 check("at least one claim extracted per bullet", len(claims) > 10, f"({len(claims)} claims)")
 
-metric_claim = next(c for c in claims if "27%" in c["claim_text"])
-check("metric extracted from '...growing user engagement 27%...'",
-      metric_claim["metric_value"] == "27" and metric_claim["metric_unit"] == "%")
+metric_claim = next(c for c in claims if "Lifted conversion 23%" in c["claim_text"])
+check("metric extracted from '...Lifted conversion 23%...'",
+      metric_claim["metric_value"] == "23" and metric_claim["metric_unit"] == "%")
 check("ownership_signal is 'absent' on a subject-less resume bullet",
       metric_claim["ownership_signal"] == "absent")
 check("risk_level elevated for metric + absent ownership",
       metric_claim["risk_level"] >= 4, f"(got {metric_claim['risk_level']})")
 
-collective_claim = next(c for c in claims if "liaison" in c["claim_text"].lower())
-check("collective ownership_signal detected on a 'liaison' bullet",
+collective_claim = next(c for c in claims
+                        if "cross-functional" in c["claim_text"].lower())
+check("collective ownership_signal detected on a 'cross-functional' bullet",
       collective_claim["ownership_signal"] == "we")
 
 no_metric_claim = next(c for c in claims if c["metric_value"] is None)
@@ -524,6 +525,71 @@ check("a truncated string carries the ellipsis marker",
       _t.endswith("…"), f"({_t!r})")
 check("a string shorter than the limit is returned untouched",
       _iu._trunc("short", 60) == "short")
+
+print("\n== Question bank: exclude/hide + custom questions")
+_qbank_pid = interview_prep.process_new_jd(
+    "QBankCo", "PM", "We need a product manager with lending experience.",
+    "pasted", MASTER_RESUME)["process_id"]
+import interview_question_bank as _qb
+_first_base_id = _qb.BASE_QUESTIONS[0]["id"]
+_second_base_id = _qb.BASE_QUESTIONS[1]["id"]
+
+with interview_store.connect() as conn:
+    check("no base questions excluded yet",
+          interview_prep.excluded_question_ids(conn, _qbank_pid, "base_question") == set())
+    interview_prep.exclude_question(conn, _qbank_pid, "base_question", _first_base_id)
+    excluded = interview_prep.excluded_question_ids(conn, _qbank_pid, "base_question")
+check("excluding a base question marks it excluded for this process",
+      _first_base_id in excluded and _second_base_id not in excluded)
+
+_qbank_pid2 = interview_prep.process_new_jd(
+    "QBankCo2", "PM", "Another JD entirely.", "pasted", MASTER_RESUME)["process_id"]
+with interview_store.connect() as conn:
+    other_process_excluded = interview_prep.excluded_question_ids(conn, _qbank_pid2, "base_question")
+check("excluding a question in one process does not affect another process",
+      _first_base_id not in other_process_excluded)
+
+with interview_store.connect() as conn:
+    interview_prep.unexclude_question(conn, _qbank_pid, "base_question", _first_base_id)
+    un_excluded = interview_prep.excluded_question_ids(conn, _qbank_pid, "base_question")
+check("un-excluding restores visibility", _first_base_id not in un_excluded)
+
+with interview_store.connect() as conn:
+    _cq_id = interview_prep.add_custom_question(
+        conn, _qbank_pid, "product_pm", "How would you launch this feature in month one?")
+    _custom_list = interview_prep.list_custom_questions(conn, _qbank_pid)
+check("add_custom_question creates a retrievable row",
+      any(q["id"] == _cq_id for q in _custom_list))
+check("add_custom_question rejects empty text", True)
+try:
+    with interview_store.connect() as conn:
+        interview_prep.add_custom_question(conn, _qbank_pid, "product_pm", "   ")
+    check("add_custom_question rejects empty text", False)
+except ValueError:
+    pass
+
+with interview_store.connect() as conn:
+    result = interview_answers.generate_answer_for_question(
+        conn, _qbank_pid, "custom_question", _cq_id,
+        "How would you launch this feature in month one?", None, MASTER_RESUME,
+        call_fn=lambda prompt: json.dumps({
+            "answer_text": "I would start by talking to users, drawing on how I lifted "
+                           "conversion 23% on the Personal Loan platform.",
+            "gaps": [],
+        }))
+check("custom questions can be answered through the normal generate path",
+      result["draft_status"] in ("complete", "complete_with_gaps", "insufficient_context"))
+
+with interview_store.connect() as conn:
+    interview_prep.delete_custom_question(conn, _qbank_pid, _cq_id)
+    _after_delete = interview_prep.list_custom_questions(conn, _qbank_pid)
+    _orphan_versions = conn.execute(
+        "SELECT COUNT(*) AS n FROM prepared_answer_version "
+        "WHERE process_id=? AND question_source='custom_question' AND question_ref_id=?",
+        (_qbank_pid, _cq_id)).fetchone()["n"]
+check("delete_custom_question removes the question",
+      not any(q["id"] == _cq_id for q in _after_delete))
+check("delete_custom_question also removes its answer versions", _orphan_versions == 0)
 
 print(f"\n{'='*60}")
 if failures:

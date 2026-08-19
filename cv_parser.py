@@ -15,7 +15,8 @@ BULLET_CHARS = ("•", "▪", "●", "‣", "", "-", "*", "�")
 
 SECTION_HEADINGS = {
     "summary": ("summary", "profile", "about"),
-    "skills": ("skills", "core competencies", "technical skills"),
+    "skills": ("skills", "core skills", "core competencies",
+              "technical skills"),
     "experience": ("professional experience", "experience", "work experience",
                    "employment"),
     # Needed by cv_structure.parse_cv_structured: it prefers this map over
