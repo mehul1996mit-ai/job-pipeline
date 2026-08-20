@@ -14,6 +14,32 @@ Sub-scores (each normalized 0..1), never blended into one opaque pass:
   achievement     — quantified-outcome density, lifted when the JD stresses it
   trajectory      — seniority progression across roles
 
+WHICH SUB-SCORES ARE ACTUALLY BLENDED (rebalanced 2026-08-19). All six are
+still computed and REPORTED — they are useful diagnostics and feedback.py
+correlates against them — but only the three that vary with the POSTING are
+blended into the score. Measured over 919 real scored jobs from the August
+queues, the other three are effectively constants:
+
+    sub-score       weight  mean  stdev   at 1.00
+    education        0.10   1.00  0.033     100%     <- pinned
+    trajectory       0.05   1.00  0.000     100%     <- zero information
+    achievement      0.10   0.92  0.070      41%     <- near-constant
+
+They are properties of the CANDIDATE'S CV, not of the fit between CV and
+posting, so they were handing every listing on earth ~25 points of free
+score (plus another ~17 from experience_fit's 0.85 "JD states no minimum"
+default). The observable effect: a Registered Nurse posting scored 46 and a
+Java Backend Developer 48, against a min_score_to_tailor of 50 — irrelevant
+work sat one bad rounding away from consuming a tailoring call, and real
+fintech roles could not separate from noise because 41 of every 100 points
+were identical for all of them.
+
+Education is NOT lost by leaving the blend: it was never doing useful work
+as a gradient, and it still functions as the hard ELIGIBILITY GATE below,
+which is the honest shape for it — you either meet a stated degree
+requirement or you don't. `trajectory_score()`/`achievement_score()` remain
+exported and tested; they just no longer dilute the fit signal.
+
 Penalties subtract (unexplained gaps, verbatim-JD-mirror). A CHECKABLE
 mandatory gate that fails (e.g. a required degree the CV lacks) hard-caps the
 score — no skill overlap compensates for ineligibility. Unverifiable gates
@@ -27,11 +53,19 @@ import re
 import company_industry
 from scoring_core import compute_match, js_round
 
-# Tunable per role-family via the `weights` argument.
+# Tunable per role-family via the `weights` argument. Only posting-responsive
+# sub-scores are blended — see "WHICH SUB-SCORES ARE ACTUALLY BLENDED" above
+# before adding one back. domain is weighted heavily on purpose: it is the
+# only signal that distinguishes "a product role in lending/fintech" from "a
+# product-shaped role in an unrelated industry", which is the single
+# distinction this pipeline exists to make.
 DEFAULT_WEIGHTS = {
-    "skill_match": 0.40, "experience_fit": 0.20, "domain": 0.15,
-    "education": 0.10, "achievement": 0.10, "trajectory": 0.05,
+    "skill_match": 0.55, "domain": 0.30, "experience_fit": 0.15,
 }
+
+# Computed and reported, deliberately NOT blended (constants across postings).
+# Kept as a named set so a future change re-adding one is an explicit act.
+DIAGNOSTIC_SUB_SCORES = ("education", "achievement", "trajectory")
 
 DEGREE_RANK = {"highschool": 1, "diploma": 2, "associate": 2, "bachelor": 3,
                "master": 4, "mba": 4, "phd": 5, "doctorate": 5}

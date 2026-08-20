@@ -46,6 +46,13 @@ PLUS_RE = re.compile(
     r"|(?:minimum|min\.?|at least)\s+(\d{1,2})\s*(?:years?|yrs?)", re.I)
 
 
+def clamp01(x: float) -> float:
+    """Clamp a configured 0..1 factor. A typo'd 25 in config.yaml (the old
+    flat-penalty value) must not multiply a score 25x -- it clamps to 1.0,
+    i.e. no penalty, which is the safe direction to fail."""
+    return max(0.0, min(1.0, float(x)))
+
+
 def parse_experience_band(jd_text: str):
     """Return (min_years, max_years) required by the JD, or None if the JD
     states no requirement."""
@@ -253,13 +260,35 @@ def score_job(jd_text: str, cv_text: str, structured_cv: dict, config: dict,
     # levels above you is not partially disqualifying. Deliberately a penalty
     # and not a filter — the row still reaches the CSV with its verdict, but
     # sinks below the digest top-N and below min_score_to_tailor, so it stops
-    # consuming tailoring calls. See config.yaml profile.over_senior_penalty.
+    # consuming tailoring calls. See config.yaml profile.over_senior_factor.
+    # The penalty is SCALED BY CONFIDENCE (2026-08-19). Measured over 747 real
+    # August rows, 49% of over_senior verdicts came from an `inferred` band —
+    # a guess from title wording with no number stated anywhere in the posting.
+    # Applying the full penalty to a guess was actively harmful: on the
+    # 2026-07-28 queue it knocked "Senior Manager FI Partnerships" 55 -> 30,
+    # "KAM | Senior Manager | Banking Alliances" 48 -> 23 and CRED's
+    # "Business Development & Partnerships" 58 -> 33 — i.e. precisely the
+    # BFSI partnership roles this search exists to find, where "Senior
+    # Manager" is routinely a 5-8y grade well within reach. A stated number
+    # still earns the full penalty; a guess only nudges.
+    # MULTIPLICATIVE, not a flat subtraction (changed 2026-08-19). The old
+    # flat -25 was calibrated against the pre-rebalance 42..100 score range;
+    # once the CV-constant sub-scores left the blend and the real range became
+    # ~0..61, that same -25 stopped demoting over-senior jobs and started
+    # ANNIHILATING them — 6 rows in a 323-row replay landed on exactly 0,
+    # losing the ordering among them entirely. A proportional factor demotes
+    # identically at any scale, so a future reweighting cannot silently turn
+    # this back into a delete. It also can never produce a negative score,
+    # which is why the max(0, ...) clamp is no longer load-bearing.
     exp = _experience_verdict(title or jd_text[:120], jd_text, config)
     score = agg["score"]
     if exp["exp_verdict"] == "over_senior":
-        penalty = float((config.get("profile", {}) or {})
-                        .get("over_senior_penalty", 25) or 25)
-        score = max(0, round(score - penalty))
+        prof = config.get("profile", {}) or {}
+        if exp["exp_confidence"] == "inferred":
+            factor = float(prof.get("over_senior_factor_inferred", 0.85) or 0.85)
+        else:
+            factor = float(prof.get("over_senior_factor", 0.5) or 0.5)
+        score = max(0, round(score * clamp01(factor)))
 
     # Calibrated AFTER the penalty (2026-08-10 fix), not before. This was a
     # real, reported bug: a job penalised to 34 for being over-senior still

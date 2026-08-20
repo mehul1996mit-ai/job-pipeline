@@ -480,6 +480,53 @@ check("score_job returns structured + frozen + percentile",
 check("scoring runs with no API key set (fully deterministic)",
       r["analyst"] == "deterministic")
 
+# --- RELEVANCE FLOOR (standing guard; fix the scorer, never the tolerance) --
+# Added 2026-08-19 after a real, measured regression. Because education,
+# achievement and trajectory are properties of the CV rather than of the fit,
+# blending them handed EVERY posting ~41 free points: a Registered Nurse
+# posting scored 46 and a Java Backend Developer 48 against a
+# min_score_to_tailor of 50, and unrelated work outranked real fintech roles.
+# Nothing in the suite caught it, because every check compared two jobs that
+# were both plausible. These four assert the SCALE itself is honest.
+_IDEAL_JD = ("Product Manager Digital Lending. Own the personal loan origination "
+             "journey for an NBFC. Credit policy, BRE rules, lead allocation, "
+             "partner integrations, disbursal funnel, conversion optimisation. "
+             "4-6 years product management in fintech/lending required.")
+_OFF_DOMAIN = {
+    "Registered Nurse": ("Registered Nurse. Provide patient care, administer "
+                         "medication, monitor vital signs, maintain patient records, "
+                         "assist physicians, ensure hospital protocol compliance."),
+    "Civil Site Engineer": ("Civil Site Engineer. Supervise construction site "
+                            "activities, review structural drawings, manage contractors, "
+                            "ensure safety compliance, track material procurement."),
+    "Java Backend Developer": ("Java Backend Developer. Build microservices with Spring "
+                               "Boot, write REST APIs, optimise SQL queries, deploy on "
+                               "AWS, unit testing, code reviews, CI/CD. 4+ years Java."),
+}
+_ideal = matcher.score_job(_IDEAL_JD, cv.raw_text, scv, config,
+                           title="Product Manager Digital Lending")["score"]
+_floor_cfg = int((config.get("filters") or {}).get("min_score_to_tailor", 50) or 50)
+for _name, _jd in _OFF_DOMAIN.items():
+    _s = matcher.score_job(_jd, cv.raw_text, scv, config, title=_name)["score"]
+    check(f"RELEVANCE: an off-domain '{_name}' scores below the tailoring floor",
+          _s < _floor_cfg,
+          f"(scored {_s}, floor {_floor_cfg})")
+    check(f"RELEVANCE: '{_name}' is far below a genuine lending-PM posting",
+          _ideal - _s >= 25, f"(ideal {_ideal} vs {_s}, gap {_ideal - _s})")
+
+# The three CV-constant sub-scores must stay OUT of the blend. If a future
+# change re-adds one to config.yaml's weights (which override by dict update),
+# the free-points floor comes straight back — hence an explicit guard.
+import aggregate as _agg
+_live_w = dict(_agg.DEFAULT_WEIGHTS)
+_live_w.update((config.get("scoring") or {}).get("weights") or {})
+check("no CV-constant sub-score has crept back into the scoring weights",
+      not (set(_live_w) & set(_agg.DIAGNOSTIC_SUB_SCORES)),
+      f"(blended: {sorted(_live_w)})")
+check("the three CV-constant sub-scores are still COMPUTED and reported",
+      set(_agg.DIAGNOSTIC_SUB_SCORES) <= set(r["sub_scores"]),
+      "(they remain useful diagnostics + feedback.py correlates on them)")
+
 print("\n== 10. MATCH FEEDBACK / LEARNING LOOP (offline)")
 import feedback as fb
 from sources import ashby, job_alert_email, smartrecruiters
@@ -673,14 +720,34 @@ check("no experience signal anywhere stays 'unknown', never a guessed number",
 # The penalty must be a PENALTY, not a filter: the row survives to the CSV.
 _cfgp = dict(config)
 _cfgp["profile"] = {"experience_years": 4, "comfort_max_years": 8,
-                    "stretch_years": 2, "over_senior_penalty": 25}
-_r = matcher.score_job("Project Manager Experience : 11 years Mumbai",
-                       cv.raw_text, scv, _cfgp, title="Project Manager")
+                    "stretch_years": 2, "over_senior_factor": 0.5,
+                    "over_senior_factor_inferred": 0.85}
+# Deliberately a STRONG, domain-rich posting that also demands 11 years, so
+# the pre-penalty score is high enough for the two calibrations below to
+# genuinely differ. A weak posting scores near the bottom either way and both
+# percentiles floor at 1, which would make the second check vacuous rather
+# than wrong -- that is exactly what happened when the 2026-08-19 rebalance
+# compressed the score range and this fixture still used a generic JD.
+_r = matcher.score_job(
+    "Senior Product Manager Digital Lending. Own the personal loan and NBFC "
+    "credit origination journey, lead allocation, partner integrations, "
+    "disbursal funnel and conversion optimisation for a fintech lender. "
+    "Minimum 11 years experience.",
+    cv.raw_text, scv, _cfgp, title="Senior Product Manager Digital Lending")
 check("over_senior costs score but still returns a scored row",
       _r["exp_verdict"] == "over_senior"
       and _r["score"] < _r["score_before_seniority"]
       and _r["score"] >= 0,
       f"({_r['score_before_seniority']} -> {_r['score']})")
+# Regression guard, 2026-08-19: the demotion must be PROPORTIONAL, not a flat
+# subtraction. A flat -25 tuned for the old 42..100 range zeroed jobs outright
+# once the rebalance moved the range to ~6..61, destroying the ordering among
+# every over-senior job. A factor demotes identically at any scale.
+check("over_senior demotion is proportional (survives a rescaled score range)",
+      _r["score"] == round(_r["score_before_seniority"] * 0.5),
+      f"({_r['score_before_seniority']} * 0.5 -> {_r['score']})")
+check("a demoted job is never annihilated to zero while its base score was real",
+      _r["score"] > 0, f"({_r['score']})")
 
 # Real reported bug, 2026-08-10: percentile/band were calibrated off
 # score_before_seniority, so a job penalised down to 34 still showed "64th

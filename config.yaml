@@ -10,14 +10,21 @@ profile:
   # How far above experience_years a stated floor may sit and still count as
   # a reachable stretch rather than out of range.
   stretch_years: 2
-  # Score penalty when a posting is judged over_senior. Deliberately large
-  # enough to push a typical 50-60 scorer under filters.min_score_to_tailor,
-  # so these stop consuming tailoring API calls and stop crowding the
-  # digest's top-N — but NOT a hard filter: the row stays in the CSV with its
-  # verdict visible. 51 of 86 reads are "inferred" (title wording, no stated
-  # number), and hard-deleting on a guess would hide the bank-style VP roles
-  # that genuinely are mid-level. Penalise, surface, let the human decide.
-  over_senior_penalty: 25
+  # Over-seniority demotion, applied as a MULTIPLIER on the final score
+  # (changed 2026-08-19 from a flat -25 subtraction). A flat penalty is
+  # scale-fragile: it was tuned against the old 42..100 score range, and when
+  # the 2026-08-19 weight rebalance moved the real range to ~0..61 the same
+  # -25 stopped demoting these jobs and started zeroing them outright, losing
+  # all ordering among them. A proportional factor demotes identically at any
+  # scale. Still a demotion, never a filter -- the row keeps its verdict in
+  # the CSV so the human decides, per the 2026-08-09 design.
+  over_senior_factor: 0.5
+  # Softer factor when the verdict rests on an INFERRED band (title wording
+  # only, no number stated anywhere in the posting). 49% of real over_senior
+  # verdicts are inferred, and treating a guess as hard as a stated number was
+  # burying BFSI "Senior Manager - Partnerships/Alliances" roles that sit
+  # squarely in range. A guess should nudge, not bury.
+  over_senior_factor_inferred: 0.85
 
 # --------------------------------------------------------------- job search
 search:
@@ -39,9 +46,7 @@ search:
     - Senior Business Analyst
     - Product Analyst
     - Program Manager
-    - Project Manager
     - Growth Manager
-    - Performance Marketing Manager
 
   # Narrower subset for SerpApi (Google Jobs) -- free tier is capped at
   # 250 searches/month. 5 broad terms x 30 days = ~150/month, leaving
@@ -61,6 +66,16 @@ search:
 # ------------------------------------------------------------------ filters
 filters:
   # A listing passes if ANY of these appears in its title (case-insensitive).
+  #
+  # NARROWED 2026-08-19. "project manager" and "performance marketing manager"
+  # were added 2026-07-29 for volume and turned out to be the single biggest
+  # source of irrelevance: they are different job families, and the scorer
+  # cannot tell "Salesforce Project Manager" from a product role (it scored 69
+  # and outranked real fintech PM roles). Measured across 2026-08-13..19,
+  # 56% of queue rows and 80% of the TOP 10 existed only because of the
+  # 07-29/08-11 filter widening. "channel manager"/"product analyst" are kept
+  # -- both are genuinely adjacent to the partnerships and product work the CV
+  # evidences.
   title_keywords:
     - product manager
     - product owner
@@ -72,8 +87,6 @@ filters:
     - alliance
     - channel manager
     - product analyst
-    - project manager
-    - performance marketing manager
   # City allowlist. Empty list = accept all cities. "remote" always passes.
   # Widened 2026-08-10 (owner ask, volume too low): added the other major
   # India GCC/product hubs. Real day-by-day run logs showed ~520 jobs/day
@@ -94,18 +107,26 @@ filters:
     - remote
   # Annual INR. Enforced ONLY when the listing itself reports a salary.
   # Set to null to disable.
-  min_salary_annual: null
+  min_salary_annual: 2000000
   # Jobs scoring below this (0-100 STRUCTURED fit score) are still listed in
   # the CSV/digest for visibility, but are NOT tailored -- no point investing a
   # tailored resume in a weak fit. Raise for stricter targeting.
   #
-  # RECALIBRATED 2026-07-28 (55 -> 50) when scoring moved to the ported
-  # structured formula. The old value was silently starving the pipeline: on
-  # the real 2026-07-16..27 queues only 1 of 12 jobs cleared 55 under the old
-  # scorer, so almost nothing was ever tailored. Measured on those same queues,
-  # 50 qualifies 7/12 -- a realistic daily tailoring volume against top_n: 25.
-  # Re-measure before changing this; the score distribution is formula-specific.
-  min_score_to_tailor: 50
+  # RECALIBRATED 2026-08-19 (50 -> 30) together with the scoring.weights
+  # rebalance below. These two MUST move together: removing the CV-constant
+  # sub-scores removed ~41 points of free floor from every job, so the real
+  # score range fell from ~42..100 to ~6..61. Leaving the floor at 50 would
+  # have tailored 0.4 jobs/day.
+  #
+  # Measured by replaying 323 real 2026-08-13..19 rows (post-narrowed-title-
+  # filter) through the new scorer:
+  #     floor 25 -> 16.3 jobs/day    floor 35 -> 3.0/day
+  #     floor 30 ->  6.9 jobs/day    floor 50 -> 0.4/day
+  # 30 clears every domain-relevant role in the replay (they score 45-61) plus
+  # strong product roles with no domain hit (~39), and cuts the generic tail.
+  # Lower to 25 if you want roughly double the tailoring volume at lower
+  # average relevance. Re-measure before changing; formula-specific.
+  min_score_to_tailor: 30
   # true = only remote / work-from-home listings pass.
   remote_only: false
 
@@ -122,16 +143,22 @@ scoring:
     - bfsi
     - digital banking
   # Structured sub-score weights. Omit to use the defaults in aggregate.py.
-  # trajectory is deliberately the SMALLEST weight: a non-linear career (a step
-  # sideways, a level down to change domain) is not a defect, and weighting it
-  # heavily is how a scorer starts quietly penalising people for real lives.
+  #
+  # REBALANCED 2026-08-19. Only sub-scores that actually vary with the POSTING
+  # are blended. education/achievement/trajectory are properties of the CV, not
+  # of the fit -- measured over 919 real August-queue jobs, trajectory had a
+  # standard deviation of 0.000 and education was pinned at 1.00 for 100% of
+  # postings. Blending them handed every listing ~41 free points, so a
+  # Registered Nurse posting scored 46 against a tailoring floor of 50 and real
+  # fintech roles could not separate from unrelated work.
+  #
+  # These keys OVERRIDE aggregate.DEFAULT_WEIGHTS by dict update, so listing a
+  # removed sub-score here would silently reinstate it. Don't re-add one
+  # without re-reading aggregate.py's header and re-measuring the floor below.
   weights:
-    skill_match: 0.40
-    experience_fit: 0.20
-    domain: 0.15
-    education: 0.10
-    achievement: 0.10
-    trajectory: 0.05
+    skill_match: 0.55
+    domain: 0.30
+    experience_fit: 0.15
 
 # ------------------------------------------------------------------ sources
 adzuna:
@@ -194,6 +221,9 @@ greenhouse:
     - okta                             # Okta — Bengaluru PM/alliances (India GCC)
     - phonepe                          # PhonePe — Bangalore PM
     - highradius                       # HighRadius — verified 2026-08-10, 56 India postings, 5 PM/BA-relevant
+    - adyen                             # Adyen — verified 2026-08-19, Payment Partnerships Lead (India)
+    - gitlab                            # GitLab — verified 2026-08-19, Sr Program Manager (India, 35 India roles)
+    - druva                             # Druva — verified 2026-08-19, Product Manager (India, 14 India roles)
 
 lever:
   # Verified the same way, 2026-07-28.
@@ -226,14 +256,12 @@ serpapi:
                                  # the month will get fewer/no SerpApi results
 
 ashby:
-  # Public job-board API. Board name = the slug in jobs.ashbyhq.com/<board>.
-  # Checked 2026-07-28 against ~40 companies known to use Ashby (Notion, Ramp,
-  # Linear, Cursor, Vanta, Replit, Harvey, Zapier, Deliveroo, and several
-  # India-origin candidates) — NONE currently have an India-located PM/BA
-  # posting, so this ships empty rather than with tokens that would poll for
-  # nothing. Re-check periodically; Ashby is growing fast among India startups.
-  boards: []
-
+  # Verified 2026-08-19 by hitting the real posting API and confirming a genuine
+  # India PM/BA/partnership posting (not just a 200). Same method as greenhouse/
+  # lever above — a board that resolves with zero India PM roles isn't worth a poll.
+  boards:
+    - openai                            # OpenAI — Product Partnerships Lead, India
+    - cursor                            # Cursor/Anysphere — Manager, Channels & Partnerships - India
 # Job-alert email ingestion — the LEGITIMATE route to Naukri / LinkedIn /
 # Indeed / Shine / foundit and any other portal with no public API.
 #
@@ -252,6 +280,24 @@ job_alert_email:
   folder: job-alerts           # Gmail label, or INBOX
   lookback_days: 2             # daily run needs only the last day or two
   max_messages: 60
+
+# recruiter_mine.py — Career Agent A9's highest-yield contact source: people
+# who already emailed Mehul about a role. Reuses the SAME personal-inbox
+# credentials as job_alert_email above (JOB_ALERT_EMAIL /
+# JOB_ALERT_APP_PASSWORD) — one mailbox, a second read-only pass over it
+# looking for 1:1 recruiter messages instead of bulk job-alert digests.
+# Independent enabled flag so this can run without job_alert_email.py's
+# source being on, or vice versa. lookback_days defaults wider (30, not 2)
+# since this is meant to catch a backlog of recruiter approaches on first
+# run, not just yesterday's.
+recruiter_mine:
+  enabled: false
+  imap_host: imap.gmail.com
+  folder: INBOX                # scans the whole inbox by default — recruiter
+                                # messages aren't pre-labeled the way job
+                                # alerts can be filtered
+  lookback_days: 30
+  max_messages: 300
 
 # ---------------------------------------------------------------- tailoring
 tailor:
