@@ -15,16 +15,23 @@ prompts.** Dashboard tab is five tabs, each with one job: 🎯 Prep Plan (a
 short, ranked, day-aware list of REAL questions — not internal topic
 labels — this is the screen you actually prepare from), 📋 Resume Claims,
 🗂️ Question Bank (every question, all base questions in their category,
-not just a ranked slice), 📖 Story Bank (fully editable SITAR stories), ✅
-Fact Review, plus a sixth tab added 2026-08-12: 🏢 Company Research
-(company/industry facts, financial metrics, current-vs-target company
-comparison, current-vs-target role comparison — see that day's entry
-below). New files: `interview_store.py`, `interview_prep.py`,
-`interview_stories.py`, `interview_answers.py`, `interview_llm.py`,
-`interview_question_bank.py`, `interview_research.py` (2026-08-12),
-`interview_ui.py` (dashboard tab), plus `interview_smoke_test.py`,
-`answer_bank_smoke_test.py`, and `interview_research_smoke_test.py`
-(2026-08-12). Read the README
+not just a ranked slice — any question can be removed per-process via
+"Remove from bank" without touching the shared underlying row, and a
+"✏️ My Questions" sub-tab lets you author your own, 2026-08-13), 📖 Story
+Bank (fully editable SITAR stories), ✅ Fact Review, plus a sixth tab added
+2026-08-12: 🏢 Company Research (company/industry facts, financial metrics,
+current-vs-target company comparison, current-vs-target role comparison —
+current-employer research is a shared singleton across every process since
+2026-08-13, target-company research stays process-isolated). Company
+research is sourced via SerpApi + plain Gemini as of 2026-08-13, NOT
+grounded Gemini search — the original grounded design was confirmed
+permanently dead on the free tier (429 persisting across a day boundary,
+not a resettable daily quota); see that day's entry. New files:
+`interview_store.py`, `interview_prep.py`, `interview_stories.py`,
+`interview_answers.py`, `interview_llm.py`, `interview_question_bank.py`,
+`interview_research.py` (2026-08-12), `interview_ui.py` (dashboard tab),
+plus `interview_smoke_test.py`, `answer_bank_smoke_test.py`, and
+`interview_research_smoke_test.py` (2026-08-12). Read the README
 section first for the architecture table; the detailed dated entries below
 (search "Interview Prep" / "Answer Bank" / "Question Bank" / "Story Bank" /
 "prep plan") have the full build history, every design call, and real bugs
@@ -305,6 +312,104 @@ questions-to-ask-the-interviewer (§43). None of these need company research
 to already exist except final-day/questions-to-ask, which are gated on it
 anyway.
 
+**✅ Company research made fully automated (2026-08-13/14) — grounded Gemini
+confirmed permanently dead on the free tier, replaced with SerpApi + plain
+Gemini, and current-employer research made a shared singleton across
+processes.** Live-tested: the 2026-08-12 grounded-search 429 was re-checked
+a full day later (both UTC and IST boundaries crossed) and still returned
+`RESOURCE_EXHAUSTED` — confirms this is not a daily quota, it's the free
+tier's search-grounding feature being effectively unavailable without
+billing enabled. Offered three alternatives (wait for reset / paste-in box +
+manual research / SerpApi automated); Mehul explicitly rejected the paste-in
+option ("I will not paste anything, everything should be automated") and
+picked SerpApi.
+
+**Architecture change, not just a swapped API call**: research is now two
+decoupled steps — SerpApi (plain web search, already has a working key/quota
+tracker in this repo for job search) gathers raw snippets, and a PLAIN
+Gemini call (confirmed working, unlike grounded) structures them into facts.
+`resolve_grounded_call_fn` deleted outright (confirmed dead code, not kept
+around half-working). New `_serpapi_search()`/`resolve_plain_call_fn()` in
+`interview_research.py`. `research_company()`/`collect_financial_metrics()`
+take an injectable `search_fn` now too (alongside the existing `call_fn`),
+so the offline smoke suite still never touches the network.
+
+**Quota discipline**: company research shares SerpApi's real account quota
+(`data/serpapi_usage.json`, same file job search already tracks) via a new
+`company_research_count` field, checked against BOTH a self-imposed 20/month
+sub-cap (so a research-heavy session can't crowd out job search's own much
+larger need) and the real combined 250/month ceiling. `fact_type` on
+search-sourced facts is `"estimate"`, not `"fact"` — a search snippet isn't
+a primary source, downgraded from the original grounded-search design which
+did label these `"fact"`.
+
+**Live-verified against the real Bajaj Finance current-company row**: real
+SerpApi calls (9 organic results per query) → real plain-Gemini structuring
+→ correct, verifiable facts (founded 1987, CEO Rajeev Jain, HQ Pune,
+Revenue ₹85,964 Cr, Revenue growth 29.4%). 3 of the 20 monthly cap used
+(1 test + 2 real), job search's own counter (140) untouched — confirmed the
+two budgets are genuinely isolated.
+
+**The "keep current-company research shared" ask surfaced a real bug in the
+comparison functions, caught before it shipped**: making `current` a
+cross-process singleton (`get_or_create_company()` now looks up by
+`company_name` globally for `role='current'`, `target` stays process-scoped
+per §45) broke `compare_companies()`, which still looked up `current` by
+`process_id` — a process that reused someone else's shared row would find
+nothing. Fixed to look up the most-recently-created `current` row globally
+instead. Caught by reasoning through the change before shipping, not by a
+live failure.
+
+**A second, unrelated, live-caught bug in the same area**: neither
+`compare_companies()` nor `compare_roles()` cleared old rows before
+re-inserting — clicking "Compare" more than once (which happened
+incidentally across sessions testing the feature) silently tripled every
+role-comparison row. Found by literally reading the live UI output (role
+comparisons appeared 2-3x each), not assumed. Fixed with a `DELETE FROM ...
+WHERE process_id=?` before each re-run in both functions; 18 stale rows in
+the real database cleaned up. Two new smoke guards assert a second run
+replaces rather than accumulates.
+
+**✅ Question Bank: remove/hide questions + author your own (2026-08-13).**
+Direct ask: "there should be an option to delete the questions present and
+also add questions on my own." Two different mechanisms, chosen deliberately
+per question type:
+- **Exclude, never hard-delete**, for `claim_question`/`metric_defense`/
+  `base_question` rows — these are shared, reusable rows (a `claim_question`
+  row is the same real question across every process it applies to), so
+  hard-deleting one from a shared table would remove it everywhere, not just
+  hide it for the process asking. New `question_exclusion` table (process +
+  source + ref_id), new `exclude_question()`/`unexclude_question()`/
+  `excluded_question_ids()` in `interview_prep.py`. "Remove from bank"
+  buttons added to `_read_through_section()` (claim/metric questions, shown
+  under Resume Claims) and `_base_question_row()` (Question Bank tab);
+  filtering applied everywhere these questions are listed, including the
+  flat searchable table.
+- **Hard delete** for the new `custom_question` table — process-owned
+  outright, never shared, never regenerated, so there's no risk of a
+  deleted one silently reappearing the way a shared row's deletion would
+  need this same exclusion mechanism to avoid.
+- **New "✏️ My Questions" tab** inside Question Bank: add-form (category +
+  text) plus a list of authored questions, each fully answerable through the
+  *existing* generate/edit/regenerate path — `"custom_question"` added to
+  `VALID_QUESTION_SOURCES`, and `generate_answer_for_question()`'s "no claim
+  → synthesize from resume summary" fallback (previously `base_question`-
+  only) extended to cover it too, since a custom question has the same
+  real-but-general context to draft from that a base question does.
+
+9 new smoke checks (`interview_smoke_test.py`): cross-process exclusion
+isolation (excluding a question in one process doesn't affect another),
+un-exclude, custom-question CRUD including the empty-text rejection and
+orphaned-answer-version cleanup on delete, and a real `generate_answer_for_
+question()` call against a custom question through a fake `call_fn`.
+Live-verified: clicked "Remove from bank" on a real base question in the
+running app, confirmed the exclusion row was written and the question
+disappeared from view (a first check ran against a stale pre-rerun DOM
+snapshot and looked like a failure — the database write had actually
+already succeeded; a longer wait confirmed the UI catches up). Reverted
+that one test exclusion afterward so live-clicking to verify didn't leave
+Mehul's real question bank silently modified.
+
 **✅ Full-repo audit (7 correctness/reuse/simplification/efficiency findings,
 all fixed same session, 2026-08-12).** A general "audit the full job_pipeline
 and make it better" request was scoped via the `code-review` skill in
@@ -434,7 +539,7 @@ All four smoke suites (`interview_smoke_test.py` — 13 new checks total this
 pass, `answer_bank_smoke_test.py`, `smoke_test.py`,
 `career_agent_smoke_test.py`) pass.
 
-## STATUS (last updated 2026-08-12)
+## STATUS (last updated 2026-08-14)
 
 **🟢 Interview Prep & Practice toolkit — Phase 1 (preparation) built,
 Phase 2 (practice/evaluation) deliberately not started.** A separate master

@@ -30,7 +30,7 @@ from interview_store import connect
 from interview_stories import _all_resume_numbers   # reused, not duplicated
 
 VALID_OPERATIONS = {"generate", "author", "revise", "correct_extraction", "correct_import"}
-VALID_QUESTION_SOURCES = {"claim_question", "metric_defense", "base_question"}
+VALID_QUESTION_SOURCES = {"claim_question", "metric_defense", "base_question", "custom_question"}
 REWRITE_EDIT_DISTANCE_RATIO = 0.5   # >= this fraction changed => 'rewritten' not 'edited'
 BATCH_CALL_PACING_SECONDS = 4       # spacing between real LLM calls in a batch — a claim's
                                      # 10 questions can mean up to 20 calls (I3 regeneration),
@@ -208,12 +208,15 @@ def generate_answer_for_question(conn, process_id: int, question_source: str,
         "SELECT company_name, role_title, jd_text FROM interview_process WHERE id = ?",
         (process_id,)).fetchone()
 
-    if claim is None and not story_text and question_source == "base_question":
+    if claim is None and not story_text and question_source in ("base_question", "custom_question"):
         # Base questions (T§4's "PM fundamentals"/"behavioral"/etc — not
         # derived from any single claim) still have real context to draft
         # from: the candidate's overall summary. Synthesizing a claim dict
         # here reuses the exact same generation/I3 path rather than adding a
         # second code path just because there's no single claim behind it.
+        # A user-authored custom_question is the same situation -- it also
+        # has no claim/story mapped to it by definition, but the summary is
+        # still real, usable context rather than a bare placeholder.
         claim = {"claim_text": master_resume.get("summary", ""), "source_company": None}
 
     if claim is None and not story_text:

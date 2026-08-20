@@ -228,6 +228,62 @@ def insert_metric_defense(conn, claim_id: int, claim_text: str, metric_value, me
             (claim_id, d["dimension"], d["question_text"], _now()))
 
 
+# ---------------------------------------------------- question management
+
+def exclude_question(conn, process_id: int, question_source: str, question_ref_id: int) -> None:
+    """Hide a claim_question/metric_defense/base_question row from this
+    process's view -- never deletes the underlying row, which is shared
+    across every process it applies to. custom_question isn't excludable
+    this way; it's owned outright by one process, see delete_custom_question."""
+    conn.execute(
+        """INSERT OR IGNORE INTO question_exclusion
+           (process_id, question_source, question_ref_id, created_at)
+           VALUES (?,?,?,?)""",
+        (process_id, question_source, question_ref_id, _now()))
+
+
+def unexclude_question(conn, process_id: int, question_source: str, question_ref_id: int) -> None:
+    conn.execute(
+        "DELETE FROM question_exclusion WHERE process_id=? AND question_source=? AND question_ref_id=?",
+        (process_id, question_source, question_ref_id))
+
+
+def excluded_question_ids(conn, process_id: int, question_source: str) -> set[int]:
+    return {r["question_ref_id"] for r in conn.execute(
+        "SELECT question_ref_id FROM question_exclusion WHERE process_id=? AND question_source=?",
+        (process_id, question_source)).fetchall()}
+
+
+def add_custom_question(conn, process_id: int, category: str, question_text: str) -> int:
+    question_text = (question_text or "").strip()
+    if not question_text:
+        raise ValueError("question_text is required")
+    cur = conn.execute(
+        """INSERT INTO custom_question (process_id, category, question_text, created_at)
+           VALUES (?,?,?,?)""",
+        (process_id, category, question_text, _now()))
+    return cur.lastrowid
+
+
+def delete_custom_question(conn, process_id: int, question_id: int) -> None:
+    """Hard delete -- a custom_question is owned outright by one process and
+    never regenerated, unlike claim/base questions, so there's no risk of it
+    silently reappearing. Also removes any prepared answers written against
+    it, since those would otherwise be orphaned rows pointing at nothing."""
+    conn.execute(
+        "DELETE FROM custom_question WHERE id=? AND process_id=?", (question_id, process_id))
+    conn.execute(
+        """DELETE FROM prepared_answer_version
+           WHERE process_id=? AND question_source='custom_question' AND question_ref_id=?""",
+        (process_id, question_id))
+
+
+def list_custom_questions(conn, process_id: int) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM custom_question WHERE process_id=? ORDER BY id DESC",
+        (process_id,)).fetchall()]
+
+
 # ------------------------------------------------------- §4.1 candidate model
 
 def build_candidate_profile(conn, structured_cv: dict, claims: list[dict],
@@ -760,14 +816,36 @@ def build_candidate_model(master_resume: dict, structured_cv: dict, db_path=None
 
 def process_new_jd(company_name: str, role_title: str, jd_text: str, jd_source: str,
                    master_resume: dict, scheduled_date: str | None = None,
-                   stage: str | None = None, db_path=None) -> dict:
-    """§4.2 end to end: create the process, ingest the JD (sync), generate
-    prep topics -- all synchronous per the spec's own requirement that steps
-    1-2 must not block on step 3 (company research, not built yet)."""
+                   stage: str | None = None, db_path=None,
+                   auto_llm_reanalyze: bool = False, config: dict | None = None,
+                   call_fn=None) -> dict:
+    """§4.2 end to end: create the process, ingest the JD (sync, deterministic,
+    no external call), generate prep topics.
+
+    `auto_llm_reanalyze`: when True, immediately follows the deterministic
+    ingest with reanalyze_process_jd()'s LLM read (one real API call) instead
+    of leaving that as a separate manual "Re-read this JD properly" step —
+    per direct request, so the process is created with a trustworthy
+    requirement list and fit % on the first pass, not the second click.
+    Defaults to False so every existing offline caller (interview_smoke_test.py
+    included) stays untouched and network-free; the UI's "+ New process" form
+    is the one caller that turns this on. The deterministic ingest always
+    runs first regardless, so a failed/unavailable LLM call degrades to
+    exactly the old behavior (deterministic requirements, re-read still
+    offered via the banner) rather than blocking process creation."""
     with connect(db_path) if db_path else connect() as conn:
         process_id = create_interview_process(
             conn, company_name, role_title, jd_text, jd_source, scheduled_date, stage)
         ingest_result = ingest_jd(conn, process_id, jd_text, master_resume)
+        requirement_ids = ingest_result["requirement_ids"]
         topic_ids = generate_prep_topics(conn, process_id)
-    return {"process_id": process_id, "requirement_ids": ingest_result["requirement_ids"],
-            "topic_ids": topic_ids}
+        analyst = "deterministic"
+        if auto_llm_reanalyze:
+            llm_result = reanalyze_process_jd(conn, process_id, master_resume,
+                                              config=config, call_fn=call_fn)
+            if llm_result["ok"]:
+                requirement_ids = llm_result["requirement_ids"]
+                topic_ids = llm_result["topic_ids"]
+                analyst = llm_result["analyst"]
+    return {"process_id": process_id, "requirement_ids": requirement_ids,
+            "topic_ids": topic_ids, "analyst": analyst}

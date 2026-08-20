@@ -228,18 +228,23 @@ def _process_switcher(conn):
             else:
                 master_resume = _master_resume()
                 _ensure_candidate_model(master_resume)
-                result = interview_prep.process_new_jd(
-                    company, role, jd_text, "pasted", master_resume,
-                    scheduled_date=str(sched) if sched else None)
+                with st.spinner("Reading the JD…"):
+                    result = interview_prep.process_new_jd(
+                        company, role, jd_text, "pasted", master_resume,
+                        scheduled_date=str(sched) if sched else None,
+                        auto_llm_reanalyze=True)
                 st.session_state["ib_active_process_id"] = result["process_id"]
                 # Resolved into the actual "ib_process_radio" widget key at
                 # the TOP of _process_switcher on the next run, before that
                 # widget is instantiated -- see the comment there for why
                 # setting it directly here throws (found live).
                 st.session_state["_ib_pending_process_id"] = result["process_id"]
-                st.success(f"Process created — {len(result['requirement_ids'])} JD "
-                          f"requirements extracted, {len(result['topic_ids'])} prep "
-                          "topics generated.")
+                read_note = ("a proper model read" if result["analyst"] == "llm"
+                            else "the fast lexical read (model re-read wasn't "
+                                 "available just now — retry from the banner below)")
+                st.success(f"Process created via {read_note} — "
+                          f"{len(result['requirement_ids'])} JD requirements extracted, "
+                          f"{len(result['topic_ids'])} prep topics generated.")
                 _commit_and_rerun(conn)
 
 
@@ -381,16 +386,20 @@ def _claim_options(conn):
         "ORDER BY risk_level DESC").fetchall()
 
 
-def _claim_questions(conn, claim_id):
-    return conn.execute(
+def _claim_questions(conn, process_id, claim_id):
+    excluded = interview_prep.excluded_question_ids(conn, process_id, "claim_question")
+    rows = conn.execute(
         "SELECT id, question_type, question_text FROM claim_question WHERE claim_id = ?",
         (claim_id,)).fetchall()
+    return [r for r in rows if r["id"] not in excluded]
 
 
-def _metric_defense_questions(conn, claim_id):
-    return conn.execute(
+def _metric_defense_questions(conn, process_id, claim_id):
+    excluded = interview_prep.excluded_question_ids(conn, process_id, "metric_defense")
+    rows = conn.execute(
         "SELECT id, dimension, question_text FROM metric_defense WHERE claim_id = ?",
         (claim_id,)).fetchall()
+    return [r for r in rows if r["id"] not in excluded]
 
 
 # -------------------------------------------------------------- generation
@@ -403,10 +412,10 @@ def _generate_for_claim(conn, process_id, claim_row, master_resume):
                 source_company=claim_row["source_company"])
     cq = [{"question_ref_id": q["id"], "question_text": q["question_text"],
           "claim": claim, "question_source": "claim_question"}
-         for q in _claim_questions(conn, claim_row["id"])]
+         for q in _claim_questions(conn, process_id, claim_row["id"])]
     cq += [{"question_ref_id": q["id"], "question_text": q["question_text"],
            "claim": claim, "question_source": "metric_defense"}
-          for q in _metric_defense_questions(conn, claim_row["id"])]
+          for q in _metric_defense_questions(conn, process_id, claim_row["id"])]
     with st.spinner(f"Generating {len(cq)} answer drafts (live Gemini calls — this takes a bit)…"):
         results = interview_answers.generate_answer_batch(conn, process_id, cq, master_resume)
     return results
@@ -533,15 +542,18 @@ def _read_through_section(conn, process_id, claim_row, questions, question_sourc
                 st.markdown(chips, unsafe_allow_html=True)
                 _answer_editor(conn, process_id, question_source, q["id"],
                                q["question_text"], claim_row["claim_text"], scope="claim")
+                if st.button("Remove from bank", key=f"ib_exclude_{question_source}_{q['id']}_{claim_row['id']}"):
+                    interview_prep.exclude_question(conn, process_id, question_source, q["id"])
+                    _commit_and_rerun(conn)
         else:
             st.caption(f"○ {label} — not generated yet")
 
 
 def _read_through_queue(conn, process_id, claim_row):
     _read_through_section(conn, process_id, claim_row,
-                          _claim_questions(conn, claim_row["id"]),
+                          _claim_questions(conn, process_id, claim_row["id"]),
                           "claim_question", "Follow-up questions")
-    metric_qs = _metric_defense_questions(conn, claim_row["id"])
+    metric_qs = _metric_defense_questions(conn, process_id, claim_row["id"])
     if metric_qs:
         _read_through_section(conn, process_id, claim_row, metric_qs,
                               "metric_defense", "Metrics defense (this claim's own number)")
@@ -611,14 +623,20 @@ def _base_question_row(conn, process_id, q, master_resume, starred=False):
             st.markdown(chips, unsafe_allow_html=True)
             _answer_editor(conn, process_id, "base_question", q["id"], q["text"],
                            qb.CATEGORY_LABELS.get(q["category"], ""), scope="bank")
+            if st.button("Remove from bank", key=f"ib_exclude_base_{q['id']}"):
+                interview_prep.exclude_question(conn, process_id, "base_question", q["id"])
+                _commit_and_rerun(conn)
     else:
-        cols = st.columns([5, 1])
+        cols = st.columns([5, 1, 1])
         cols[0].caption(f"○ {label}{star}")
         if cols[1].button("Generate", key=f"ib_gen_base_{q['id']}"):
             with st.spinner("Generating…"):
                 interview_answers.generate_answer_for_question(
                     conn, process_id, "base_question", q["id"], q["text"],
                     None, master_resume)
+            _commit_and_rerun(conn)
+        if cols[2].button("Remove", key=f"ib_exclude_base_ng_{q['id']}"):
+            interview_prep.exclude_question(conn, process_id, "base_question", q["id"])
             _commit_and_rerun(conn)
 
 
@@ -784,10 +802,15 @@ def _all_questions_for_bank(conn, process_id):
     recommended_ids = {r["source_ref_id"] for r in conn.execute(
         "SELECT source_ref_id FROM prep_topic WHERE process_id=? AND source='base_question_bank'",
         (process_id,)).fetchall()}
+    excluded_claim = interview_prep.excluded_question_ids(conn, process_id, "claim_question")
+    excluded_metric = interview_prep.excluded_question_ids(conn, process_id, "metric_defense")
+    excluded_base = interview_prep.excluded_question_ids(conn, process_id, "base_question")
     rows = []
     for c in conn.execute("SELECT id, claim_text, category, risk_level FROM resume_claim").fetchall():
         for q in conn.execute(
                 "SELECT id, question_text FROM claim_question WHERE claim_id=?", (c["id"],)).fetchall():
+            if q["id"] in excluded_claim:
+                continue
             v = _current_version_row(conn, process_id, "claim_question", q["id"])
             rows.append({
                 "Question": q["question_text"], "Category": f"Claim — {c['category']}",
@@ -797,6 +820,8 @@ def _all_questions_for_bank(conn, process_id):
             })
         for q in conn.execute(
                 "SELECT id, question_text FROM metric_defense WHERE claim_id=?", (c["id"],)).fetchall():
+            if q["id"] in excluded_metric:
+                continue
             v = _current_version_row(conn, process_id, "metric_defense", q["id"])
             rows.append({
                 "Question": q["question_text"], "Category": "Metrics defense",
@@ -805,12 +830,23 @@ def _all_questions_for_bank(conn, process_id):
                 "Reviewed": v["review_depth"] if v else "—",
             })
     for q in qb.BASE_QUESTIONS:
+        if q["id"] in excluded_base:
+            continue
         v = _current_version_row(conn, process_id, "base_question", q["id"])
         rows.append({
             "Question": q["text"] + (" ⭐" if q["id"] in recommended_ids else ""),
             "Category": qb.CATEGORY_LABELS.get(q["category"], q["category"]),
             "Priority": 1.0 if q["id"] in recommended_ids else round(
                 qb.CATEGORY_BASE_IMPORTANCE.get(q["category"], 0.5) * 0.9, 2),
+            "Status": v["draft_status"] if v else "not generated",
+            "Reviewed": v["review_depth"] if v else "—",
+        })
+    for q in interview_prep.list_custom_questions(conn, process_id):
+        v = _current_version_row(conn, process_id, "custom_question", q["id"])
+        rows.append({
+            "Question": q["question_text"],
+            "Category": qb.CATEGORY_LABELS.get(q["category"], q["category"]) + " (yours)",
+            "Priority": 0.5,
             "Status": v["draft_status"] if v else "not generated",
             "Reviewed": v["review_depth"] if v else "—",
         })
@@ -836,26 +872,85 @@ def _question_bank_table(conn, process_id):
     st.dataframe(df, hide_index=True, width="stretch")
 
 
+def _custom_question_row(conn, process_id, q, master_resume):
+    v = _current_version_row(conn, process_id, "custom_question", q["id"])
+    label = q["question_text"]
+    if v:
+        gaps = v["body_text"].count("[YOU FILL:")
+        gap_note = f" · {gaps} blank(s)" if gaps else ""
+        chips = _draft_status_chip(v["draft_status"]) + _review_depth_chip(v["review_depth"])
+        with st.expander(f"{label}{gap_note}"):
+            st.markdown(chips, unsafe_allow_html=True)
+            _answer_editor(conn, process_id, "custom_question", q["id"], label,
+                           q["category"], scope="custom")
+            if st.button("Delete this question", key=f"ib_delete_custom_{q['id']}"):
+                interview_prep.delete_custom_question(conn, process_id, q["id"])
+                _commit_and_rerun(conn)
+    else:
+        cols = st.columns([5, 1, 1])
+        cols[0].caption(f"○ {label}")
+        if cols[1].button("Generate", key=f"ib_gen_custom_{q['id']}"):
+            with st.spinner("Generating…"):
+                interview_answers.generate_answer_for_question(
+                    conn, process_id, "custom_question", q["id"], label,
+                    None, master_resume)
+            _commit_and_rerun(conn)
+        if cols[2].button("Delete", key=f"ib_delete_custom_ng_{q['id']}"):
+            interview_prep.delete_custom_question(conn, process_id, q["id"])
+            _commit_and_rerun(conn)
+
+
+def _custom_questions_tab(conn, process_id, master_resume):
+    st.caption("Questions you write yourself — not derived from your resume or the base bank. "
+              "Drafted from your resume summary the same way base questions are, and fully "
+              "editable/regenerable like any other question here.")
+    with st.form("ib_add_custom_question", clear_on_submit=True):
+        cat = st.selectbox("Category", options=list(qb.CATEGORY_LABELS.keys()),
+                           format_func=lambda c: qb.CATEGORY_LABELS[c], key="ib_custom_q_cat")
+        text = st.text_area("Question", height=80, key="ib_custom_q_text")
+        added = st.form_submit_button("Add question", type="primary")
+    if added:
+        if not text.strip():
+            st.error("Question text can't be empty.")
+        else:
+            interview_prep.add_custom_question(conn, process_id, cat, text)
+            _commit_and_rerun(conn)
+
+    custom_qs = interview_prep.list_custom_questions(conn, process_id)
+    if not custom_qs:
+        st.caption("No custom questions yet — add one above.")
+        return
+    for q in custom_qs:
+        _custom_question_row(conn, process_id, q, master_resume)
+
+
 def _question_bank_tab(conn, process_id, master_resume):
     st.caption("Every question you might get asked, organized into buckets by tab. Every base "
               "question is included in its bucket — ⭐ marks the ones ranked highest-priority "
-              "for this specific JD, but nothing is hidden or capped.")
+              "for this specific JD, but nothing is hidden or capped. Removed a question by "
+              "mistake, or don't see one you want? Use Remove from bank on any question, or add "
+              "your own in ✏️ My Questions.")
     with st.expander("🔎 Search across every question (flat table)"):
         _question_bank_table(conn, process_id)
 
     recommended_ids = {r["source_ref_id"] for r in conn.execute(
         "SELECT source_ref_id FROM prep_topic WHERE process_id=? AND source='base_question_bank'",
         (process_id,)).fetchall()}
+    excluded_base = interview_prep.excluded_question_ids(conn, process_id, "base_question")
 
     cat_keys = list(qb.CATEGORY_LABELS.keys())
-    cat_tabs = st.tabs([qb.CATEGORY_LABELS[c] for c in cat_keys])
+    cat_labels = [qb.CATEGORY_LABELS[c] for c in cat_keys] + ["✏️ My Questions"]
+    cat_tabs = st.tabs(cat_labels)
     for cat_key, tab in zip(cat_keys, cat_tabs):
         with tab:
-            qs = [q for q in qb.BASE_QUESTIONS if q["category"] == cat_key]
+            qs = [q for q in qb.BASE_QUESTIONS
+                 if q["category"] == cat_key and q["id"] not in excluded_base]
             st.caption(f"{len(qs)} questions in this bucket.")
             for q in qs:
                 _base_question_row(conn, process_id, q, master_resume,
                                    starred=q["id"] in recommended_ids)
+    with cat_tabs[-1]:
+        _custom_questions_tab(conn, process_id, master_resume)
 
 
 # --------------------------------------------------------------- claims tab
@@ -876,9 +971,9 @@ def _claims_tab(conn, process_id, claims, master_resume):
               "unclear ownership, exactly the combination a follow-up exposes.")
 
     has_any = any(_current_version_row(conn, process_id, "claim_question", q["id"])
-                 for q in _claim_questions(conn, claim_row["id"])) or \
+                 for q in _claim_questions(conn, process_id, claim_row["id"])) or \
               any(_current_version_row(conn, process_id, "metric_defense", q["id"])
-                 for q in _metric_defense_questions(conn, claim_row["id"]))
+                 for q in _metric_defense_questions(conn, process_id, claim_row["id"]))
     if not has_any:
         st.info("Generate first-pass answers using your confirmed facts and stories. "
                 "Anything only you know will be left blank for you to fill.")

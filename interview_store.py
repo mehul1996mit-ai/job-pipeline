@@ -313,6 +313,32 @@ CREATE TABLE IF NOT EXISTS role_comparison (
     recommendation TEXT NOT NULL,    -- emphasize | reframe | learn | dont_overemphasize
     created_at TEXT NOT NULL
 );
+
+-- Per-process hide-list for claim_question/metric_defense/base_question rows
+-- (all of which are shared, reusable definitions -- a claim_question row is
+-- the same real question across every process it applies to). Excluding it
+-- for one process must never delete or affect any other process's view of
+-- the same underlying row.
+CREATE TABLE IF NOT EXISTS question_exclusion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    process_id INTEGER NOT NULL REFERENCES interview_process(id),
+    question_source TEXT NOT NULL,   -- claim_question | metric_defense | base_question
+    question_ref_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(process_id, question_source, question_ref_id)
+);
+
+-- User-authored questions, process-scoped (unlike claim/base questions,
+-- these are never shared -- a question you write for one interview has no
+-- reason to appear in another). Fully answerable through the same
+-- generate/author/revise path as any other question_source.
+CREATE TABLE IF NOT EXISTS custom_question (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    process_id INTEGER NOT NULL REFERENCES interview_process(id),
+    category TEXT NOT NULL,
+    question_text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 DEFAULT_COMPETENCIES = [
