@@ -28,10 +28,30 @@ profile:
 
 # --------------------------------------------------------------- job search
 search:
-  # Skill-cluster-derived title list (see CLAUDE.md, 2026-07-29 revision) --
-  # each title maps to a capability actually evidenced in resume_master.json,
-  # not a guess. Matching downstream is still done against the full CV.
+  # Two tiers, and the split is load-bearing (2026-08-23).
+  #
+  # GENERIC tier: broad role titles. Measured live against the real Adzuna
+  # API these return only 21-35% domain-relevant postings for India -- they
+  # are what the pipeline searched EXCLUSIVELY until now, and they are why
+  # the daily queue filled up with TPM/PMO/HR-platform roles. Kept, because
+  # each returns a genuinely DISJOINT pool (measured: 0% URL overlap between
+  # "Product Manager" and "Senior Product Manager"), so cutting any of them
+  # loses real coverage rather than removing duplication.
+  #
+  # DOMAIN-QUALIFIED tier: the same roles with the domain named in the query.
+  # Measured yield 75-100% domain-relevant, and they surface postings the
+  # generic queries never return at all -- Paytm Senior PM (Lending), PhonePe
+  # BA Lending, Kotak Business Loans PM and Amazon Sr PM Credit & Lending
+  # were all live on Adzuna and had NEVER been fetched by this pipeline.
+  #
+  # This replaces the previous reasoning (kept below in serpapi_titles until
+  # today) that domain-narrowed queries were unnecessary because
+  # scoring.domain_keywords would surface those roles from the broad query.
+  # That is provably wrong: scoring can only rank what search fetched, and a
+  # fintech role outside the broad query's capped result set is never scored
+  # at all. See CLAUDE.md 2026-08-23.
   titles:
+    # --- generic (21-35% domain-relevant) ---
     - Product Manager
     - Senior Product Manager
     - Digital Product Manager
@@ -41,27 +61,38 @@ search:
     - Growth Product Manager
     - AI Product Manager
     - Partnership Manager
-    - Channel Manager
     - Business Analyst
     - Senior Business Analyst
     - Product Analyst
     - Program Manager
     - Growth Manager
+    # --- domain-qualified (measured 75-100% domain-relevant) ---
+    - Product Manager fintech
+    - Product Manager lending
+    - Product Manager credit
+    - Product Manager payments
+    - Product Manager banking
+    - Product Manager loans
+    - Product Manager insurance
+    - Digital Lending Product Manager
+    - Business Analyst lending
+    - Business Analyst fintech
+    - Partnership Manager fintech
+    - Growth Manager fintech
 
-  # Narrower subset for SerpApi (Google Jobs) -- free tier is capped at
-  # 250 searches/month. 5 broad terms x 30 days = ~150/month, leaving
-  # headroom for pagination and repeated debug runs. Domain-narrowed
-  # variants (Lending PM, Fintech PM, etc.) are deliberately excluded here --
-  # the scoring bonus for lending/credit/fintech (see scoring.domain_keywords)
-  # already surfaces those roles from the broad "Product Manager" query, so
-  # a dedicated SerpApi query would spend quota without adding qualification,
-  # only search-rank depth (see CLAUDE.md).
+  # Narrower subset for SerpApi (Google Jobs) -- the free tier is capped at
+  # 250 searches/month, so these are the SCARCEST calls in the pipeline and
+  # must therefore be the highest-yield ones. Switched to domain-qualified
+  # 2026-08-23: the previous generic list ran at ~21-35% domain-relevant, so
+  # roughly 7 of every 10 scarce SerpApi calls were spent fetching TPM/PMO
+  # roles. Domain-qualified queries measure 75-100% -- about 3-4x the useful
+  # yield per call, at identical quota cost.
   serpapi_titles:
-    - Product Manager
-    - Business Analyst
-    - Partnership Manager
-    - Program Manager
-    - Growth Manager
+    - Product Manager fintech
+    - Product Manager lending
+    - Digital Lending Product Manager
+    - Business Analyst lending
+    - Partnership Manager fintech
 
 # ------------------------------------------------------------------ filters
 filters:
@@ -73,9 +104,16 @@ filters:
   # cannot tell "Salesforce Project Manager" from a product role (it scored 69
   # and outranked real fintech PM roles). Measured across 2026-08-13..19,
   # 56% of queue rows and 80% of the TOP 10 existed only because of the
-  # 07-29/08-11 filter widening. "channel manager"/"product analyst" are kept
-  # -- both are genuinely adjacent to the partnerships and product work the CV
-  # evidences.
+  # 07-29/08-11 filter widening.
+  #
+  # "channel manager" ALSO removed 2026-08-23. Checked against every historical
+  # queue rather than assumed: of the 10 jobs it uniquely admitted, 8 were
+  # sales/distribution noise ("YouTube Channel Manager", ABB Energy Industries,
+  # a PUMA/Unilever area sales role, a plywood dealer). Its 2 genuine BFSI hits
+  # (CSB Bank LAP, a Home Loan sales channel role) are now reached by the
+  # domain-qualified search queries above instead. "product analyst" is KEPT --
+  # the same check showed it uniquely admitting JPMorgan, slice, Paytm
+  # (Lending) and Tide product-analyst roles, which are squarely on-target.
   title_keywords:
     - product manager
     - product owner
@@ -85,7 +123,6 @@ filters:
     - growth lead
     - partnership
     - alliance
-    - channel manager
     - product analyst
   # City allowlist. Empty list = accept all cities. "remote" always passes.
   # Widened 2026-08-10 (owner ask, volume too low): added the other major
