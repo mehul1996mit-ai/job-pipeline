@@ -168,8 +168,8 @@ with store.connect(db_path) as conn:
 print("\n== 3. F4 — volume caps, clamped in code")
 import ratelimit
 
-check("config cannot raise the daily draft cap above 20",
-      ratelimit.clamp(999, ratelimit.MAX_DRAFTS_PER_DAY) == 20)
+check("config cannot raise the daily draft cap above 30",
+      ratelimit.clamp(999, ratelimit.MAX_DRAFTS_PER_DAY) == 30)
 check("config cannot raise the per-company cooldown above 21 days",
       ratelimit.clamp(999, ratelimit.MAX_DAYS_BETWEEN_OUTREACH_SAME_COMPANY) == 21)
 check("config CAN lower the per-company cooldown below 21 days",
@@ -181,12 +181,12 @@ with store.connect(db_path) as conn:
     )
     cap_company_id = conn.execute("SELECT id FROM company WHERE name='CapCo'").fetchone()["id"]
     today = datetime.date.today().isoformat()
-    for i in range(20):
+    for i in range(30):
         conn.execute(
             "INSERT INTO outreach (company_id, state, created_at) VALUES (?, 'DRAFTED', ?)",
-            (cap_company_id, f"{today}T{i:02d}:00:00"),
+            (cap_company_id, f"{today}T00:00:{i:02d}"),
         )
-    check("21st draft in a day is refused", not ratelimit.can_draft_today(conn, today=today))
+    check("31st draft in a day is refused", not ratelimit.can_draft_today(conn, today=today))
     check("2nd outreach to the same company inside 21 days is refused",
           not ratelimit.can_draft_for_company(conn, cap_company_id,
                                                now=datetime.datetime.utcnow()))

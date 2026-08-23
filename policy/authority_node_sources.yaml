@@ -9,3 +9,11 @@ valid_sources:
   - conference_speaker_list      # published speaker bio at an industry event
   - published_byline_or_podcast  # authored article or podcast appearance
   - user_manual_entry            # Mehul entered this himself
+  - inbound_email                # extracted from a message the person sent directly
+                                  # to Mehul's own inbox (recruiter_mine.py) — same
+                                  # "it's his own data" reasoning as job_alert_email.py,
+                                  # never scraped or inferred
+  - derived_role_inbox           # careers@/jobs@/hr@<company's own verified domain>
+                                  # (careers_inbox.py) — not a discovered person, a
+                                  # structural convention address at a domain already
+                                  # confirmed to belong to the company

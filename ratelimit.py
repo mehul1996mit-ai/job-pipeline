@@ -1,10 +1,15 @@
-"""F4 volume caps for outreach (A8, not yet built) — clamped here so a
-config.yaml value can never raise them. Import MAX_* from this module rather
-than reading caps out of config.yaml directly.
+"""F4 volume caps for outreach — clamped here so a config.yaml value can
+never raise them. Import MAX_* from this module rather than reading caps
+out of config.yaml directly.
 """
 import datetime
 
-MAX_DRAFTS_PER_DAY = 20
+# Raised 20 -> 30 (2026-08-18) per explicit user decision, after checking
+# feasibility against the real job-queue data: median 15 unique companies/
+# day, 616 total unique companies across 19 days. 30/day only reaches
+# careers@ volume (generic role inboxes), not 30 distinct named contacts —
+# see recruiter_mine.py / careers_inbox.py for how the two tiers combine.
+MAX_DRAFTS_PER_DAY = 30
 MAX_DAYS_BETWEEN_OUTREACH_SAME_COMPANY = 21
 MAX_FOLLOWUPS_PER_THREAD = 2
 SUPPRESSION_DAYS_AFTER_CLOSE = 180

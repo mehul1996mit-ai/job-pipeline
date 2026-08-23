@@ -683,59 +683,204 @@ with tab_filters:
 # ---------------------------------------------------------- Outreach review
 with tab_outreach:
     st.caption(
-        "Career Agent (A8/A9) outreach drafts. Every send here is one explicit "
-        "click by you on the exact draft shown below — nothing sends on its "
-        "own. Full auto-send was asked for and declined; see CLAUDE.md's "
-        "2026-08-10 entry for why."
+        "Career Agent (A8/A9) outreach drafts, grouped under the job posting "
+        "each one is about. Every send here is one explicit click by you on "
+        "the exact draft shown below — nothing sends on its own. Full "
+        "auto-send was asked for and declined; see CLAUDE.md's 2026-08-10 "
+        "entry for why."
     )
     try:
         import outreach_store as ca_store
         import outreach_crm as ca_crm
         import outreach_send as ca_send
+        import outreach_shortlist as ca_shortlist
+        import ratelimit as ca_ratelimit
     except ImportError as e:
         st.info(f"Career Agent modules not available ({e}).")
     else:
-        if not os.path.exists(ca_store.DB_PATH):
-            st.info("No career_agent.sqlite3 yet — nothing to review. Run "
-                     "company_targeting.py / authority_graph.py / outreach.py first.")
+        outreach_queues = sorted(glob.glob(str(DATA / "job_queue_*.csv")), reverse=True)
+        if not outreach_queues:
+            st.info("No queue CSVs yet — nothing to build an outreach shortlist from.")
         else:
-            with ca_store.connect() as _conn:
-                pending = ca_send.list_pending_review(_conn)
-            if not pending:
-                st.success("No drafts waiting for review.")
-            else:
-                st.write(f"**{len(pending)} draft(s) waiting for review.**")
-                for row in pending:
-                    label = (f"{row['company_name']} — "
-                              f"{row.get('person_name') or 'unknown contact'} — {row['subject']}")
-                    with st.expander(label):
-                        st.write(f"**To:** {row.get('to_email') or '(unknown)'}")
-                        st.write(f"**Subject:** {row['subject']}")
-                        st.text_area("Body", row["body"], height=150,
-                                     key=f"body_{row['id']}", disabled=True)
-                        c1, c2 = st.columns(2)
-                        if c1.button("✅ Approve & send", key=f"approve_{row['id']}"):
-                            try:
-                                import gmail_auth as ca_gmail_auth
-                                service = ca_gmail_auth.get_service()
-                            except Exception as e:
-                                st.error(f"Gmail auth failed: {e}")
-                            else:
-                                try:
-                                    with ca_store.connect() as _conn2:
-                                        ca_send.send_approved_draft(
-                                            _conn2, service, row["id"], confirmed=True)
-                                    st.success("Sent.")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Send failed: {e}")
-                        if c2.button("🚫 Reject", key=f"reject_{row['id']}"):
-                            with ca_store.connect() as _conn2:
-                                ca_crm.update_outreach_state(
-                                    _conn2, row["id"], "CLOSED", reason="rejected_at_review")
-                            st.info("Rejected — moved to CLOSED, not sent.")
+            from datetime import date as _od
+            out_by_day = {Path(p).stem.replace("job_queue_", ""): p for p in outreach_queues}
+            out_available = sorted(out_by_day, reverse=True)
+            odc1, odc2 = st.columns([1, 2])
+            out_picked = odc1.date_input(
+                "Outreach date", value=_od.fromisoformat(out_available[0]),
+                min_value=_od.fromisoformat(out_available[-1]),
+                max_value=_od.fromisoformat(out_available[0]),
+                key="outreach_date_picker",
+                help="Which day's job queue to draft outreach against.")
+            out_key = out_picked.isoformat()
+            if out_key not in out_by_day:
+                out_key = min(out_available,
+                               key=lambda d: abs((_od.fromisoformat(d) - out_picked).days))
+                odc2.warning(f"No queue stored for {out_picked.isoformat()}. Showing {out_key}.")
 
-                            st.rerun()
+            with ca_store.connect() as _conn:
+                today_count = ca_ratelimit.drafts_created_today(_conn)
+                cap = ca_ratelimit.MAX_DRAFTS_PER_DAY
+                remaining = max(0, cap - today_count)
+                st.caption(f"**{today_count}/{cap}** outreach drafts created today "
+                           f"(UTC) — {remaining} remaining under F4's daily cap.")
+
+                gen_col1, gen_col2 = st.columns([1, 3])
+                max_new = gen_col1.number_input(
+                    "Generate up to", min_value=1, max_value=max(remaining, 1),
+                    value=min(10, max(remaining, 1)), key="outreach_max_new",
+                    disabled=remaining == 0)
+                if gen_col2.button(
+                    f"⚡ Generate outreach for {out_key}", key="generate_outreach_btn",
+                    disabled=remaining == 0,
+                ):
+                    try:
+                        import gmail_auth as ca_gmail_auth
+                        service = ca_gmail_auth.get_service()
+                    except Exception as e:
+                        st.warning(f"Gmail auth unavailable ({e}) — falling back to .eml files.")
+                        service = None
+                    stats = ca_shortlist.generate_drafts_for_day(
+                        _conn, service, out_key, max_new=int(max_new), log=lambda *a, **k: None)
+                    st.success(f"Drafted {stats['drafted']}. Skipped: "
+                               f"{stats['skipped_no_contact']} (no contact), "
+                               f"{stats['skipped_already_sent']} (already outreached), "
+                               f"{stats['skipped_precondition']} (F4/precondition).")
+                    st.rerun()
+
+                shortlist = ca_shortlist.build_shortlist_for_day(_conn, out_key)
+
+            if not shortlist:
+                st.info(f"No postings with a company+URL found in {out_key}'s queue.")
+            else:
+                tier_label = {"inbound_recruiter": "🟢 recruiter contact",
+                               "derived_role_inbox": "🟡 careers@ inbox", None: "⚪ no contact yet"}
+                for row in shortlist:
+                    tier = row["contact"]["tier"] if row["contact"] else None
+                    status = (f"sent/pending — {row['existing_state']}" if row["already_outreached"]
+                               else "not yet drafted")
+                    named = row.get("named_ref")
+                    attn_badge = f" — 👤 Attn: {named['person_name']}" if named else ""
+                    header = (f"{row['company_name']} — {row['title']} — "
+                              f"{tier_label[tier]}{attn_badge} — {status}")
+                    with st.expander(header):
+                        st.caption(
+                            f"Posting: {row['url']}  \n"
+                            + (f"First seen {row['freshness_days']} day(s) ago  \n"
+                               if row["freshness_days"] is not None else "")
+                            + f"Score: {row['score']:.0f}")
+                        if named:
+                            st.caption(
+                                f"👤 Named reference: **{named['person_name']}**"
+                                + (f" — {named['title']}" if named.get("title") else "")
+                                + " (used to personalize the draft; the send target stays "
+                                  "the verified careers@ inbox, not this person's email).")
+                        if row["contact"] is None:
+                            st.warning("No usable contact for this company yet "
+                                       "(no recruiter contact, no verified domain for "
+                                       "careers@/jobs@/hr@).")
+                        elif not row["already_outreached"]:
+                            st.info(f"Eligible to draft — contact: {row['contact']['to_email']} "
+                                    f"({tier_label[tier]}). Use 'Generate outreach' above, or "
+                                    f"it'll be picked up on the next generate pass.")
+                        else:
+                            with ca_store.connect() as _conn3:
+                                draft_row = _conn3.execute(
+                                    """SELECT outreach.*, company.name AS company_name,
+                                              authority_node.person_name AS person_name,
+                                              contact_channel.value AS to_email
+                                       FROM outreach
+                                       JOIN company ON company.id = outreach.company_id
+                                       LEFT JOIN authority_node
+                                         ON authority_node.id = outreach.authority_node_id
+                                       LEFT JOIN contact_channel
+                                         ON contact_channel.id = outreach.channel_id
+                                       WHERE outreach.id = ?""",
+                                    (row["existing_outreach_id"],)).fetchone()
+                            if draft_row is None:
+                                st.caption("Draft record not found (may have been deleted).")
+                            elif draft_row["state"] != "DRAFTED":
+                                st.caption(f"State: **{draft_row['state']}** — no longer pending review.")
+                            else:
+                                st.write(f"**To:** {draft_row['to_email'] or '(unknown)'}")
+                                st.write(f"**Subject:** {draft_row['subject']}")
+                                st.text_area("Body", draft_row["body"], height=150,
+                                             key=f"body_{draft_row['id']}", disabled=True)
+                                c1, c2 = st.columns(2)
+                                if c1.button("✅ Approve & send", key=f"approve_{draft_row['id']}"):
+                                    try:
+                                        import gmail_auth as ca_gmail_auth
+                                        service = ca_gmail_auth.get_service()
+                                    except Exception as e:
+                                        st.error(f"Gmail auth failed: {e}")
+                                    else:
+                                        try:
+                                            with ca_store.connect() as _conn4:
+                                                ca_send.send_approved_draft(
+                                                    _conn4, service, draft_row["id"], confirmed=True)
+                                            st.success("Sent.")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Send failed: {e}")
+                                if c2.button("🚫 Reject", key=f"reject_{draft_row['id']}"):
+                                    with ca_store.connect() as _conn4:
+                                        ca_crm.update_outreach_state(
+                                            _conn4, draft_row["id"], "CLOSED",
+                                            reason="rejected_at_review")
+                                    st.info("Rejected — moved to CLOSED, not sent.")
+                                    st.rerun()
+
+        # Fallback: any pending draft not tied to a job_id in the selected
+        # day's queue (older manual drafts, company-centric outreach,
+        # anything from before this shortlist view existed) — still
+        # reachable, never silently hidden by the new grouped view above.
+        with ca_store.connect() as _conn5:
+            all_pending = ca_send.list_pending_review(_conn5)
+            shown_ids = set()
+            if outreach_queues:
+                with ca_store.connect() as _conn6:
+                    shortlist_ids = {
+                        r["existing_outreach_id"]
+                        for r in ca_shortlist.build_shortlist_for_day(_conn6, out_key)
+                        if r["existing_outreach_id"]
+                    }
+                shown_ids = shortlist_ids
+            other_pending = [p for p in all_pending if p["id"] not in shown_ids]
+
+        if other_pending:
+            st.divider()
+            st.write(f"**{len(other_pending)} other pending draft(s)** "
+                     "(not tied to this day's queue):")
+            for row in other_pending:
+                label = (f"{row['company_name']} — "
+                          f"{row.get('person_name') or 'unknown contact'} — {row['subject']}")
+                with st.expander(label):
+                    st.write(f"**To:** {row.get('to_email') or '(unknown)'}")
+                    st.write(f"**Subject:** {row['subject']}")
+                    st.text_area("Body", row["body"], height=150,
+                                 key=f"other_body_{row['id']}", disabled=True)
+                    c1, c2 = st.columns(2)
+                    if c1.button("✅ Approve & send", key=f"other_approve_{row['id']}"):
+                        try:
+                            import gmail_auth as ca_gmail_auth
+                            service = ca_gmail_auth.get_service()
+                        except Exception as e:
+                            st.error(f"Gmail auth failed: {e}")
+                        else:
+                            try:
+                                with ca_store.connect() as _conn7:
+                                    ca_send.send_approved_draft(
+                                        _conn7, service, row["id"], confirmed=True)
+                                st.success("Sent.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Send failed: {e}")
+                    if c2.button("🚫 Reject", key=f"other_reject_{row['id']}"):
+                        with ca_store.connect() as _conn7:
+                            ca_crm.update_outreach_state(
+                                _conn7, row["id"], "CLOSED", reason="rejected_at_review")
+                        st.info("Rejected — moved to CLOSED, not sent.")
+                        st.rerun()
 
 # --------------------------------------------------------------- Interview Prep
 with tab_interview:
